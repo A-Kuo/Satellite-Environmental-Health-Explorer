@@ -1,0 +1,5 @@
+pollutant,n_ground_truth_site_days,n_valid_satellite_retrievals,coverage_pct
+no2,857,389,45.39089848308051
+so2,2541,815,32.073986619441165
+co,813,491,60.39360393603936
+pm25,7198,2550,35.42650736315643

@@ -1,0 +1,22 @@
+agent.md
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Raw data (regenerable via src/ingest.py; checksums in data/metadata/ingest_log.csv)
+data/raw/*
+!data/raw/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
+.env/.env
+.env/gis-environmental-health-usa-1bc5a3460d37.json

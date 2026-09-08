@@ -1,0 +1,2 @@
+city,pollutant,features_added,rolling_median_r2_before,rolling_median_r2_after,pct_folds_beating_baseline_before,pct_folds_beating_baseline_after,site_holdout_median_r2_before,site_holdout_median_r2_after,promoted
+madison,pm25,"surface_solar_radiation_downwards, absorbing_aerosol_index",0.178,0.16932461877531535,0.375,0.375,0.687,0.6990855602447358,False
