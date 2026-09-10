@@ -11,7 +11,9 @@ further review, community engagement, or policy attention.
 > review reflect the selected public indicators and analytic assumptions, not a
 > definitive measure of risk or harm.
 
-Currently achieves data acquisition, cleaning, validation, and static exploration. See `methodology.md` for data sources, years, units, and known limitations.
+Ships as an interactive Streamlit app (`app/streamlit_app.py`) backed by a
+reproducible data-acquisition, cleaning, and validation pipeline (`src/`). See
+`methodology.md` for data sources, years, units, and known limitations.
 
 ## Model status
 
@@ -74,13 +76,33 @@ py -3.12 -m venv .venv
 .venv\Scripts\python src\ingest.py
 .venv\Scripts\python src\clean_svi.py
 .venv\Scripts\python src\clean_indicator.py
-.venv\Scripts\python src\spatial_join.py
+.venv\Scripts\python -m src.ingest_cropland
+.venv\Scripts\python -m src.ingest_wetlands
+.venv\Scripts\python -m src.spatial_join
 .venv\Scripts\python src\metrics.py
 .venv\Scripts\python src\map_layers.py
 ```
 
-Outputs land in `data/processed/`: five Parquet/GeoParquet tables, a summary
+`ingest_cropland.py` and `ingest_wetlands.py` require the GEE service-account
+key (`.env/*.json`, see below) and pull tract-level agricultural-pressure and
+wetland-extent indicators via `src/gee_polygon_utils.py`. `spatial_join.py`
+reads every indicator file present in `data/processed/` and concatenates them
+into one long-format screening view — run as `-m src.spatial_join` (not
+`python src\spatial_join.py`) since it now imports from `src.validate`.
+
+Outputs land in `data/processed/`: geometry/SVI/indicator Parquet/GeoParquet
+tables (now three indicator files: PM2.5, cropland, wetlands), a summary
 statistics CSV, and two static PNGs (choropleth + scatterplot).
+
+## Running the interactive app
+
+```bash
+.venv\Scripts\streamlit run app\streamlit_app.py
+```
+
+Opens the screening map, scatter, review table, and methods drawer under a
+"Screening" tab, with the non-promoted modeling research (below) under a
+separate "Research Appendix" tab in the same header tab bar.
 
 ## Running the satellite calibration model
 
@@ -192,10 +214,36 @@ data/processed/    cleaned Parquet/GeoParquet tables, summary stats, static plot
 data/metadata/     data dictionary + ingest log (provenance/checksums)
 notebooks/         end-to-end exploration and validation notebook
 src/               pipeline modules (ingest, clean, join, validate, metrics, maps, satellite calibration)
-app/               Stage Two — not yet built
+app/               Streamlit app (streamlit_app.py entry, components/ for map/table/scatter/legend/appendix)
 tests/             pytest validation suite
 .env/              GEE service-account key (gitignored, not committed)
 ```
+
+## Multi-state roadmap
+
+Wisconsin is currently hardcoded end-to-end. `app/config.py` and
+`src/validate.py`'s `STATE_FIPS`/`STATE_NAME`/`STATE_ABBR` constants are a
+first, deliberately minimal step (naming, not function) — the sidebar's
+"State" selector is a disabled placeholder, not a working switch. What a
+second state would actually need, not yet built:
+
+- `src/ingest.py`'s per-source download URLs and output filenames are
+  Wisconsin-specific literals, not a template (each source's URL scheme
+  differs enough — state name in path vs. FIPS in filename — that a generic
+  substitution would be guesswork before a second state is actually being
+  onboarded).
+- `src/validate.py::check_wisconsin_fips_prefix` (and its enforced test,
+  `tests/test_geography.py::test_wisconsin_fips_prefix`) hard-fails on any
+  non-WI GEOID — correct for a single-state pipeline, but would need to
+  become state-parameterized.
+- The LUR pipeline's metric buffering uses `EPSG:3070` (Wisconsin Transverse
+  Mercator) — accurate only within/near Wisconsin; a second state needs its
+  own suitable projected CRS.
+- `indicator_percentile_wi`/`concern_percentile_wi` are computed relative to
+  Wisconsin's own tracts. Multi-state needs an explicit decision: state-
+  relative per state, or one national-relative percentile across all states.
+- No city/place (Census Places) geometry is ingested anywhere — county is
+  currently the finest sub-tract administrative unit available.
 
 ## Project summary
 

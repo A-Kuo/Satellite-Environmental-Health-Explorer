@@ -18,6 +18,13 @@ RAW_DIR = REPO_ROOT / "data" / "raw"
 METADATA_DIR = REPO_ROOT / "data" / "metadata"
 INGEST_LOG = METADATA_DIR / "ingest_log.csv"
 
+# Every URL below is Wisconsin-specific (state name/FIPS baked directly into
+# the path or filename, not a template) -- see README.md's "Multi-state
+# roadmap" section for what a second state would need here. Not parameterized
+# in this pass: each source's URL scheme is a little different per state
+# (e.g. SVI's state-name-in-path vs. TIGER's FIPS-in-filename), so a generic
+# STATE_FIPS/STATE_NAME substitution here would be more guesswork than
+# reuse until a second state is actually being onboarded.
 SVI_URL = "https://svi.cdc.gov/Documents/Data/2022/csv/states/Wisconsin.csv"
 TIGER_TRACT_URL = "https://www2.census.gov/geo/tiger/TIGER2022/TRACT/tl_2022_55_tract.zip"
 # EJScreen 2.3 was removed from EPA's own site in Feb 2025 (see methodology.md).

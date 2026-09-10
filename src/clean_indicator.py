@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.validate import STATE_FIPS
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RAW_PATH = REPO_ROOT / "data" / "raw" / "ejscreen_2024_tract_statepct_national.csv"
 OUT_PATH = REPO_ROOT / "data" / "processed" / "wi_pm25_2022.parquet"
@@ -32,7 +34,7 @@ def clean_indicator(raw_path: Path = RAW_PATH) -> pd.DataFrame:
     usecols = ["ID", "STATE_NAME", "PM25"]
     df = pd.read_csv(raw_path, usecols=usecols, dtype={"ID": str})
 
-    wi = df[df["ID"].str.startswith("55")].copy()
+    wi = df[df["ID"].str.startswith(STATE_FIPS)].copy()
     wi = wi.rename(columns={"ID": "geoid", "PM25": "indicator_value"})
     wi = wi.drop(columns=["STATE_NAME"])
 

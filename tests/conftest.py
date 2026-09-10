@@ -23,6 +23,16 @@ def indicator_df():
 
 
 @pytest.fixture(scope="session")
+def cropland_df():
+    return pd.read_parquet(PROCESSED_DIR / "wi_cropland_2022.parquet")
+
+
+@pytest.fixture(scope="session")
+def wetlands_df():
+    return pd.read_parquet(PROCESSED_DIR / "wi_wetlands_2022.parquet")
+
+
+@pytest.fixture(scope="session")
 def exposure_gdf(tracts_gdf, indicator_df):
     return tracts_gdf.merge(indicator_df, on="geoid", how="left")
 

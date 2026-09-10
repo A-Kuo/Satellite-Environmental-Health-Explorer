@@ -63,17 +63,62 @@ Implications for interpretation:
   achieved 100% indicator coverage and ~98.8% SVI coverage against the 1,542
   Wisconsin tract geometries.
 
+## Additional Stage One indicators: agricultural pressure and wetland resilience
+
+Beyond PM2.5, the screening view now carries three more tract-level
+indicators, pulled via Google Earth Engine (GEE) the same way the research
+workstream below pulls satellite data, but joined into the *screening* view
+rather than kept in the research appendix:
+
+| Indicator | Source | Resolution | Year | Unit |
+|---|---|---|---|---|
+| Row-Crop Cultivation Share (Corn & Soybean) | USDA NASS Cropland Data Layer | Census tract, WI | 2022 | fraction of tract area |
+| Pastureland Share (Dairy-Associated) | USDA NASS Cropland Data Layer | Census tract, WI | 2022 | fraction of tract area |
+| Wetland & Surface Water Extent | Google Dynamic World V1 | Census tract, WI | 2022 (Jun–Sep composite) | fraction of tract area |
+
+The two CDL-derived indicators are fertilizer/pesticide- and
+manure/nutrient-runoff-loading proxies for Wisconsin's agricultural
+watersheds (row crops and dairy pasture respectively) — reduced per tract at
+CDL's native 30m resolution via a pixel-count histogram over each tract
+polygon (`src/gee_polygon_utils.py`, `src/ingest_cropland.py`). Wetland
+extent is a *protective* indicator — reduced per tract at Dynamic World's
+native 10m resolution from a growing-season (Jun–Sep) per-pixel mode
+composite (`src/ingest_wetlands.py`) — a full-year composite was tried first
+and found computationally prohibitive for no accuracy benefit at this
+resolution.
+
+**Indicator direction matters, and this is enforced in the schema, not just
+described here.** PM2.5, row-crop share, and pastureland share are all
+`high is concern` — more of the thing means more concern. Wetland extent is
+the opposite: a *low* value (little protective wetland buffer) is the
+concerning direction, not a high one. `src/spatial_join.py`'s
+`LOW_IS_CONCERN_INDICATORS` set and the derived `concern_percentile_wi`
+column normalize this so `screening_flag` and the app's map/scatter coloring
+are never silently backwards for a protective indicator — see
+`data/metadata/data_dictionary.md`'s screening-view schema.
+
+**Deferred, not built in this pass**: NDTI (Sentinel-2 water-quality
+turbidity for specific waterbodies like Lake Winnebago and the
+Mendota/Monona chain) needs waterbody boundary polygons that aren't ingested
+anywhere in this repo yet. NBR/dNBR (Landsat forest-disturbance change
+detection, e.g. for the Chequamegon-Nicolet National Forest) needs two
+composited periods differenced against each other plus new validation for
+what counts as "disturbed," a bigger lift than a single-snapshot indicator.
+Both would reuse `src/gee_polygon_utils.py`'s polygon-extraction helper once
+built.
+
 ## Percentile conventions
 
 `overall_svi_percentile` (and the other SVI theme percentiles) are **national**-
 relative, as published by CDC/ATSDR — SVI does not publish a state-relative
 percentile. `indicator_percentile_wi`, by contrast, is computed directly in this
-pipeline as a **Wisconsin-relative** rank of the raw PM2.5 value across all 1,542
-WI tracts (not EJScreen's own national percentile column). Screening flags compare
-these two percentiles at their respective (national vs. state) reference frames —
-analysts should keep this distinction in mind when interpreting a flagged tract,
-and it is called out explicitly in the app's methods documentation to come in
-Stage Two.
+pipeline as a **Wisconsin-relative** rank of each indicator's own raw value
+across all 1,542 WI tracts (not EJScreen's own national percentile column,
+and computed separately per indicator now that more than one exists — see
+above). Screening flags compare these two percentiles at their respective
+(national vs. state) reference frames — analysts should keep this
+distinction in mind when interpreting a flagged tract, and it is called out
+explicitly in the app's methods documentation.
 
 ## What this is not
 

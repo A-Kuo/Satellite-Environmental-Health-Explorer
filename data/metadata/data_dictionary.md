@@ -73,6 +73,39 @@ Wisconsin Environmental Health Explorer. All tables are keyed by `geoid`, the
   tract — do not present it as directly measured concentration.
 - Rows: 1,542 Wisconsin tracts. No missing values.
 
+## `environmental_indicator` — `data/processed/wi_cropland_2022.parquet`
+
+Same schema as `wi_pm25_2022.parquet` above. Two stacked indicators (3,084
+rows total, 1,542 tracts × 2):
+
+- `"Row-Crop Cultivation Share (Corn & Soybean)"` — fraction of tract area
+  (0–1) classified corn, soybean, or a double-crop combination involving
+  either, from the USDA NASS Cropland Data Layer (CDL) 2022, 30m resolution.
+  A fertilizer/pesticide-loading proxy.
+- `"Pastureland Share (Dairy-Associated)"` — fraction of tract area (0–1)
+  classified grass/pasture, other hay, or alfalfa, from CDL 2022. A
+  manure/nutrient-runoff loading proxy, specific to Wisconsin's dairy
+  industry.
+
+Source: `https://www.nass.usda.gov/Research_and_Science/Cropland/SARS1a.php`,
+pulled via Google Earth Engine (`USDA/NASS/CDL`). Both are **high is
+concern** indicators (more row-crop/pasture intensity = more loading
+pressure) — see `concern_percentile_wi` on the screening view below.
+
+## `environmental_indicator` — `data/processed/wi_wetlands_2022.parquet`
+
+Same schema as `wi_pm25_2022.parquet` above. One indicator,
+`"Wetland & Surface Water Extent"` — fraction of tract area (0–1) classified
+water or flooded vegetation by Google Dynamic World V1, composited over the
+2022 growing season (June–September, per-pixel mode), 10m resolution.
+
+Source: `https://developers.google.com/earth-engine/datasets/catalog/GOOGLE_DYNAMICWORLD_V1`.
+**This is a `low is concern` indicator** — wetlands are a protective buffer,
+so a *low* value (little wetland/surface-water extent) is the direction
+worth screening for, the opposite of every other indicator in this pipeline.
+See `LOW_IS_CONCERN_INDICATORS` in `src/spatial_join.py` and
+`concern_percentile_wi` below.
+
 ## `monitor_or_facility_points` — `data/processed/wi_dnr_points.parquet`
 
 | Field | Type | Description |
@@ -102,12 +135,13 @@ Wisconsin Environmental Health Explorer. All tables are keyed by `geoid`, the
 | `geoid` | string | 11-digit Census tract GEOID |
 | `geography_name` | string | from `geographies` |
 | `county_name` | string | from `geographies` |
-| `selected_indicator` | string | `"PM2.5 Annual Concentration"` |
-| `indicator_value` | float | from `environmental_indicator` |
-| `indicator_percentile_wi` | float (0–1) | **Wisconsin-relative** percentile rank of `indicator_value`, computed via `pandas.rank(pct=True)` across all 1,542 WI tracts (not EJScreen's own national percentile field) |
+| `selected_indicator` | string | one of `"PM2.5 Annual Concentration"`, `"Row-Crop Cultivation Share (Corn & Soybean)"`, `"Pastureland Share (Dairy-Associated)"`, `"Wetland & Surface Water Extent"` — the view is **long format**, one row per (tract, indicator) |
+| `indicator_value` | float | from `environmental_indicator`, in that indicator's own unit |
+| `indicator_percentile_wi` | float (0–1) | **Wisconsin-relative** percentile rank of `indicator_value`, computed via `pandas.rank(pct=True)` **within each indicator's own distribution** (`groupby("indicator_name")`), not across mixed indicators |
+| `concern_percentile_wi` | float (0–1) | `indicator_percentile_wi`, direction-normalized so a **high value always means "more concerning"** — equal to `indicator_percentile_wi` for most indicators, or `1 - indicator_percentile_wi` for indicators in `LOW_IS_CONCERN_INDICATORS` (currently only wetland/surface-water extent). `screening_flag` and the app's map/scatter coloring use this column, never the raw `indicator_percentile_wi` |
 | `overall_svi_percentile` | float (0–1) | from `social_vulnerability`, national-relative as published |
 | `data_coverage_flag` | string | from `environmental_indicator` |
-| `screening_flag` | bool | `True` only if both `indicator_percentile_wi` and `overall_svi_percentile` are ≥ 0.75 |
+| `screening_flag` | bool | `True` only if both `concern_percentile_wi` and `overall_svi_percentile` are ≥ 0.75 |
 | `screening_rationale` | string | plain-language explanation of the flag, always framed as "for analyst review," never as a risk/harm determination |
 | `last_updated` | string | ISO date the view was built |
 | `geometry` | geometry (Polygon) | from `geographies`, EPSG:4269 |
@@ -115,8 +149,11 @@ Wisconsin Environmental Health Explorer. All tables are keyed by `geoid`, the
 No column in this table (or any other) is named `risk_score`, `priority_score`, or
 `harm_score` — enforced by `tests/test_validation.py::test_no_risk_score_column`.
 
-- Rows: 1,542. Of these, 89 tracts (~5.8%) are flagged for review under the ≥75th
-  Wisconsin-percentile-on-both-axes rule.
+- Rows: 1,542 tracts × 4 indicators = 6,168 (long format, one row per
+  tract-indicator pair). The originally-documented 89-tract PM2.5 flag count
+  (~5.8% of tracts, under the ≥75th-percentile-on-both-axes rule) still holds
+  for the PM2.5 subset; other indicators flag independently within their own
+  distribution.
 
 ## `data/metadata/ingest_log.csv`
 

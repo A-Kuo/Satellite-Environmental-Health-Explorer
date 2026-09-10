@@ -15,7 +15,9 @@ DISCLAIMER_BANNER = (
 
 BASIS_MISMATCH_NOTE = (
     "Indicator percentile is Wisconsin-relative; SVI percentile is national-relative. "
-    "These are not on the same reference frame."
+    "These are not on the same reference frame. Map color and the review table's "
+    "\"relative concern\" column are direction-normalized per indicator (see Methods) "
+    "so a high value always means more concern, even for protective indicators."
 )
 
 PURPOSE_AND_BOUNDARY = """
@@ -34,7 +36,9 @@ CDC/ATSDR Social Vulnerability Index (SVI) context at the census-tract level.
 DATA_SOURCES_TABLE = [
     {"Table": "Geometries", "Source": "Census TIGER/Line 2022", "Resolution": "Census tract, WI", "Year": "2022", "Unit": "—"},
     {"Table": "Social vulnerability", "Source": "CDC/ATSDR SVI 2022", "Resolution": "Census tract, WI", "Year": "2022", "Unit": "percentile, 0–1"},
-    {"Table": "Environmental indicator", "Source": "EPA EJScreen 2.3 (PM2.5), via Harvard Dataverse mirror", "Resolution": "Census tract, WI", "Year": "2022", "Unit": "µg/m³, modeled"},
+    {"Table": "PM2.5", "Source": "EPA EJScreen 2.3, via Harvard Dataverse mirror", "Resolution": "Census tract, WI", "Year": "2022", "Unit": "µg/m³, modeled"},
+    {"Table": "Row-crop & pastureland share", "Source": "USDA NASS Cropland Data Layer, via Google Earth Engine", "Resolution": "Census tract, WI", "Year": "2022", "Unit": "fraction of tract area"},
+    {"Table": "Wetland & surface water extent", "Source": "Google Dynamic World V1, via Google Earth Engine", "Resolution": "Census tract, WI", "Year": "2022 (Jun–Sep composite)", "Unit": "fraction of tract area"},
     {"Table": "Contextual points", "Source": "WI DNR Air Management Data Viewer, \"All Monitors\"", "Resolution": "Point, statewide", "Year": "live snapshot", "Unit": "—"},
 ]
 
@@ -53,8 +57,17 @@ PERCENTILE_BASIS_MISMATCH = """
 `overall_svi_percentile` is **national-relative**, as published by CDC/ATSDR (SVI
 does not publish a state-relative percentile). `indicator_percentile_wi` is
 **Wisconsin-relative**, computed directly in this pipeline as a rank of the raw
-indicator value across all 1,542 WI tracts. A tract flagged for review is high on
-both reference frames at once — not on a single, shared percentile scale.
+indicator value within that indicator's own distribution across all 1,542 WI
+tracts (percentile is never computed across different indicators together). A
+tract flagged for review is high on both reference frames at once — not on a
+single, shared percentile scale.
+
+**Indicator direction:** most indicators are "high is concern" (more PM2.5, more
+row-crop or pastureland intensity = more concern), but wetland/surface-water
+extent is a protective indicator — a *low* value is the concerning direction.
+The map's color and the table's "relative concern" column use a direction-
+normalized `concern_percentile_wi`, not the raw `indicator_percentile_wi`, so a
+high value always means more concern regardless of which indicator is selected.
 """
 
 MISSING_DATA_HANDLING = """
@@ -62,8 +75,9 @@ MISSING_DATA_HANDLING = """
 tracts (~1%) have no SVI score (typically zero-population or non-residential
 tracts) and are shown as no-data, not imputed.
 
-**Environmental indicator:** EJScreen has full tract coverage for Wisconsin in
-this release; no imputation was needed.
+**Environmental indicators:** PM2.5 (EJScreen), row-crop/pastureland share (CDL),
+and wetland/surface-water extent (Dynamic World) all have full tract coverage
+for Wisconsin; no imputation was needed for any of them.
 
 Join coverage is validated to be ≥90%; Stage One achieved 100% indicator
 coverage and ~98.8% SVI coverage against the 1,542 Wisconsin tract geometries.

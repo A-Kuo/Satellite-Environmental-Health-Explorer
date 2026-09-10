@@ -13,6 +13,15 @@ import pandas as pd
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PROCESSED_DIR = REPO_ROOT / "data" / "processed"
 
+# Multi-state scaffolding (intentionally minimal -- see README.md's
+# "Multi-state roadmap" section for what's still WI-specific beyond these
+# named constants: source download URLs, output filenames, the WI-specific
+# projected CRS used for metric buffering in the LUR pipeline, and the
+# Wisconsin-relative percentile semantics).
+STATE_FIPS = "55"
+STATE_NAME = "Wisconsin"
+STATE_ABBR = "WI"
+
 FORBIDDEN_COLUMNS = {"risk_score", "priority_score", "harm_score"}
 MIN_JOIN_COVERAGE = 0.90
 
@@ -32,7 +41,7 @@ def check_geoid_format(tracts_gdf: gpd.GeoDataFrame) -> None:
 
 
 def check_wisconsin_fips_prefix(tracts_gdf: gpd.GeoDataFrame) -> None:
-    assert tracts_gdf["geoid"].str.startswith("55").all(), "Non-Wisconsin GEOIDs present"
+    assert tracts_gdf["geoid"].str.startswith(STATE_FIPS).all(), f"Non-{STATE_NAME} GEOIDs present"
 
 
 def check_crs(tracts_gdf: gpd.GeoDataFrame) -> None:
@@ -70,9 +79,21 @@ def check_no_negative_pm25(indicator_df: pd.DataFrame) -> None:
     assert (indicator_df["indicator_value"].dropna() >= 0).all(), "Negative PM2.5 values"
 
 
+def check_fraction_range(indicator_df: pd.DataFrame) -> None:
+    """For indicators expressed as a fraction of tract area (cropland,
+    wetlands): values must fall in [0, 1]."""
+    valid = indicator_df["indicator_value"].dropna()
+    assert valid.between(0, 1).all(), "Fraction-of-area indicator value out of [0, 1] range"
+
+
 def check_screening_flag_logic(screening_df: pd.DataFrame) -> None:
+    """screening_flag is keyed off concern_percentile_wi (direction-normalized
+    so a high value always means "more concerning"), not the raw
+    indicator_percentile_wi -- see LOW_IS_CONCERN_INDICATORS in
+    src/spatial_join.py. For a low-is-concern indicator (e.g. wetland
+    extent), a flagged row legitimately has a LOW indicator_percentile_wi."""
     flagged = screening_df[screening_df["screening_flag"]]
-    assert (flagged["indicator_percentile_wi"] >= 0.75).all()
+    assert (flagged["concern_percentile_wi"] >= 0.75).all()
     assert (flagged["overall_svi_percentile"] >= 0.75).all()
 
 

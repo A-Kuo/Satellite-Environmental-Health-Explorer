@@ -15,6 +15,8 @@ from pathlib import Path
 import geopandas as gpd
 import pandas as pd
 
+from src.validate import STATE_NAME
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RAW_DIR = REPO_ROOT / "data" / "raw"
 PROCESSED_DIR = REPO_ROOT / "data" / "processed"
@@ -25,12 +27,32 @@ DNR_GEOJSON = RAW_DIR / "wi_dnr_air_monitors_snapshot.geojson"
 
 TRACTS_OUT = PROCESSED_DIR / "wi_tracts_2022.parquet"
 SVI_PATH = PROCESSED_DIR / "wi_svi_2022.parquet"
-INDICATOR_PATH = PROCESSED_DIR / "wi_pm25_2022.parquet"
+# Every available indicator table is concatenated (long format: one row per
+# geoid x indicator_name) before building the screening view. Each entry
+# must follow the environmental_indicator schema (geoid, indicator_name,
+# indicator_year, indicator_value, unit, data_coverage_flag,
+# aggregation_method, source_url). Missing files are skipped so the pipeline
+# still runs before every ingestion script has been run once.
+INDICATOR_PATHS = [
+    PROCESSED_DIR / "wi_pm25_2022.parquet",
+    PROCESSED_DIR / "wi_cropland_2022.parquet",
+    PROCESSED_DIR / "wi_wetlands_2022.parquet",
+]
 DNR_POINTS_OUT = PROCESSED_DIR / "wi_dnr_points.parquet"
 SCREENING_VIEW_OUT = PROCESSED_DIR / "tract_screening_view.parquet"
 
 TARGET_CRS = "EPSG:4269"
 SCREENING_PERCENTILE_THRESHOLD = 0.75
+
+# Indicators where a LOW value is the concerning direction (e.g. wetlands are
+# a protective buffer -- little wetland extent is the signal worth review,
+# not a lot). Every indicator not listed here defaults to "high is concern"
+# (true for PM2.5 and the agricultural-loading indicators: more of the thing
+# means more concern). concern_percentile_wi normalizes both cases so that a
+# high value always means "more concerning," regardless of the underlying
+# indicator's own direction -- screening_flag and the map's choropleth color
+# both key off concern_percentile_wi, never the raw indicator_percentile_wi.
+LOW_IS_CONCERN_INDICATORS = {"Wetland & Surface Water Extent"}
 
 DNR_SOURCE_URL = (
     "https://dnrmaps.wi.gov/arcgis/rest/services/AM_WARP_MAP/AM_MONITORS_WTM_Int/MapServer/0"
@@ -57,7 +79,7 @@ def build_tracts(tiger_zip: Path = TIGER_ZIP, county_fips_txt: Path = COUNTY_FIP
     ]
 
     gdf = gdf.merge(county_names, on="county_fips", how="left")
-    gdf["geography_name"] = gdf["NAMELSAD"] + ", " + gdf["county_name"] + ", Wisconsin"
+    gdf["geography_name"] = gdf["NAMELSAD"] + ", " + gdf["county_name"] + f", {STATE_NAME}"
     gdf["geography_type"] = "census_tract"
 
     return gdf[
@@ -93,29 +115,52 @@ def build_dnr_points(dnr_geojson: Path = DNR_GEOJSON) -> pd.DataFrame:
 
 
 def build_screening_view(
-    tracts: gpd.GeoDataFrame, svi: pd.DataFrame, indicator: pd.DataFrame
+    tracts: gpd.GeoDataFrame, svi: pd.DataFrame, indicators: pd.DataFrame
 ) -> gpd.GeoDataFrame:
+    """Builds the long-format screening view: one row per (geoid, indicator_name).
+
+    `indicators` may stack more than one indicator's rows (e.g. PM2.5 +
+    cropland + wetlands, all sharing the environmental_indicator schema) --
+    a plain merge on geoid between the 1-row-per-tract `tracts` table and the
+    N-rows-per-tract `indicators` table expands correctly into long format.
+    Percentile is computed *within* each indicator's own distribution
+    (groupby, not a global rank) so indicators are never compared against
+    each other's raw values.
+    """
     assert tracts.crs is not None and tracts.crs.to_epsg() in (4269, 4326), "Unexpected tract CRS"
 
-    merged = tracts.merge(indicator, on="geoid", how="left").merge(svi, on="geoid", how="left")
+    merged = tracts.merge(indicators, on="geoid", how="left").merge(svi, on="geoid", how="left")
 
-    merged["indicator_percentile_wi"] = merged["indicator_value"].rank(pct=True)
+    merged["indicator_percentile_wi"] = merged.groupby("indicator_name")["indicator_value"].rank(
+        pct=True
+    )
+
+    # Normalizes indicator direction so a high value always means "more
+    # concerning," regardless of whether the underlying indicator itself
+    # trends that way (PM2.5, cropland, pasture) or the opposite way
+    # (wetland extent -- see LOW_IS_CONCERN_INDICATORS above). screening_flag
+    # and the map's choropleth color both key off this column, never the raw
+    # indicator_percentile_wi.
+    is_low_concern = merged["indicator_name"].isin(LOW_IS_CONCERN_INDICATORS)
+    merged["concern_percentile_wi"] = merged["indicator_percentile_wi"].where(
+        ~is_low_concern, 1 - merged["indicator_percentile_wi"]
+    )
 
     merged["screening_flag"] = (
-        (merged["indicator_percentile_wi"] >= SCREENING_PERCENTILE_THRESHOLD)
+        (merged["concern_percentile_wi"] >= SCREENING_PERCENTILE_THRESHOLD)
         & (merged["overall_svi_percentile"] >= SCREENING_PERCENTILE_THRESHOLD)
     ).fillna(False)
 
     merged["screening_rationale"] = merged["screening_flag"].map(
         {
             True: (
-                "Selected because both the environmental indicator and SVI are at or "
-                "above the Wisconsin 75th percentile. This is a screening flag for "
+                f"Selected because both the environmental indicator and SVI are at or "
+                f"above the {STATE_NAME} 75th percentile. This is a screening flag for "
                 "analyst review, not a health-risk estimate."
             ),
             False: (
                 "Not flagged: the environmental indicator and/or SVI percentile for "
-                "this tract falls below the Wisconsin 75th-percentile screening "
+                f"this tract falls below the {STATE_NAME} 75th-percentile screening "
                 "threshold."
             ),
         }
@@ -131,6 +176,7 @@ def build_screening_view(
         "selected_indicator",
         "indicator_value",
         "indicator_percentile_wi",
+        "concern_percentile_wi",
         "overall_svi_percentile",
         "data_coverage_flag",
         "screening_flag",
@@ -153,10 +199,20 @@ def main() -> None:
     print(f"Wrote {len(dnr_points):,} rows -> {DNR_POINTS_OUT}")
 
     svi = pd.read_parquet(SVI_PATH)
-    indicator = pd.read_parquet(INDICATOR_PATH)
-    screening_view = build_screening_view(tracts, svi, indicator)
+    available_paths = [p for p in INDICATOR_PATHS if p.exists()]
+    missing_paths = [p for p in INDICATOR_PATHS if not p.exists()]
+    if missing_paths:
+        print(f"Skipping {len(missing_paths)} not-yet-built indicator file(s): "
+              f"{', '.join(p.name for p in missing_paths)}")
+    indicators = pd.concat(
+        [pd.read_parquet(p) for p in available_paths], ignore_index=True
+    )
+    screening_view = build_screening_view(tracts, svi, indicators)
     screening_view.to_parquet(SCREENING_VIEW_OUT, index=False)
-    print(f"Wrote {len(screening_view):,} rows -> {SCREENING_VIEW_OUT}")
+    n_indicators = screening_view["selected_indicator"].nunique()
+    print(
+        f"Wrote {len(screening_view):,} rows ({n_indicators} indicators) -> {SCREENING_VIEW_OUT}"
+    )
 
 
 if __name__ == "__main__":
