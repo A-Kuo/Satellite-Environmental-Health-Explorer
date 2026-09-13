@@ -1,5 +1,5 @@
 """Builds the Folium map for the screening page: an indicator choropleth
-(always on), an optional SVI choropleth layer, and an optional DNR
+(always on), an optional SVI choropleth layer, and an optional air-monitor
 contextual point layer. Layer visibility is controlled entirely by the
 sidebar checkboxes in app/streamlit_app.py (which gate whether a layer is
 added to the map at all) -- there is deliberately no second, competing
@@ -7,6 +7,11 @@ Folium LayerControl toggle. The legend for these layers is rendered
 separately in Streamlit itself (app/components/legend.py), not as floating
 branca color bars on the map, so it stays visible and readable regardless of
 which layers are toggled.
+
+The default map view (when no `bounds` override is given) is always derived
+from `gdf.total_bounds()`, not a fixed state-specific center/zoom constant --
+this is what lets a newly selected state's tracts be framed correctly with
+no per-state map constant needed.
 """
 from __future__ import annotations
 
@@ -15,15 +20,10 @@ import folium
 import geopandas as gpd
 import pandas as pd
 
-from app.config import STATE_ABBR
-
 INDICATOR_COLORS = ["#ffffb2", "#fecc5c", "#fd8d3c", "#f03b20", "#bd0026"]
 SVI_COLORS = ["#f7fbff", "#9ecae1", "#3182bd", "#08306b"]
 NO_DATA_COLOR = "#cccccc"
 FLAGGED_OUTLINE_COLOR = "#bd0026"  # matches scatter.py's SCREENING_COLOR_MAP red
-
-WI_CENTER = [44.6, -89.7]
-DEFAULT_ZOOM = 7
 
 
 def _percentile_style(cmap: bcm.LinearColormap, field: str, outline_flagged: bool = False):
@@ -43,17 +43,19 @@ def _percentile_style(cmap: bcm.LinearColormap, field: str, outline_flagged: boo
 
 def build_screening_map(
     gdf: gpd.GeoDataFrame,
-    dnr_df: pd.DataFrame,
+    monitor_df: pd.DataFrame,
     indicator_label: str,
+    state_abbr: str,
     show_svi_layer: bool = False,
-    show_dnr_points: bool = True,
+    show_monitor_points: bool = True,
     bounds: list[list[float]] | None = None,
 ) -> folium.Map:
+    m = folium.Map(tiles="OpenStreetMap")
     if bounds:
-        m = folium.Map(tiles="OpenStreetMap")
         m.fit_bounds(bounds)
-    else:
-        m = folium.Map(location=WI_CENTER, zoom_start=DEFAULT_ZOOM, tiles="OpenStreetMap")
+    elif len(gdf):
+        minx, miny, maxx, maxy = gdf.total_bounds
+        m.fit_bounds([[miny, minx], [maxy, maxx]])
 
     indicator_cmap = bcm.LinearColormap(colors=INDICATOR_COLORS, vmin=0, vmax=1)
     indicator_geojson = gdf[[
@@ -74,7 +76,7 @@ def build_screening_map(
             ],
             aliases=[
                 "Tract", "County", f"{indicator_label} value",
-                f"Indicator percentile ({STATE_ABBR}-relative)", "Relative concern (percentile)",
+                f"Indicator percentile ({state_abbr}-relative)", "Relative concern (percentile)",
                 "SVI percentile (national-relative)", "Flagged for review",
             ],
             localize=True,
@@ -95,11 +97,11 @@ def build_screening_map(
             ),
         ).add_to(m)
 
-    if show_dnr_points:
-        dnr_layer = folium.FeatureGroup(
-            name="DNR points (contextual only — not joined to tracts)"
+    if show_monitor_points:
+        monitor_layer = folium.FeatureGroup(
+            name="Air monitor points (EPA AQS, contextual only — not joined to tracts)"
         )
-        for _, row in dnr_df.iterrows():
+        for _, row in monitor_df.iterrows():
             folium.CircleMarker(
                 location=[row["latitude"], row["longitude"]],
                 radius=5,
@@ -112,7 +114,7 @@ def build_screening_map(
                     f"{row['name']} ({row['point_type']}) — contextual only, "
                     f"not joined to any tract | {row['pollutant_or_permit_type']}"
                 ),
-            ).add_to(dnr_layer)
-        dnr_layer.add_to(m)
+            ).add_to(monitor_layer)
+        monitor_layer.add_to(m)
 
     return m

@@ -2,65 +2,75 @@
 
 Files here are never modified after download. Cleaning happens in the
 clean_*.py / spatial_join.py modules, which read from data/raw/.
+
+Per-state sources (SVI, TIGER tracts, county FIPS reference) are generated
+from URL templates driven by src/states.py -- run with `--state <ABBR>` for
+a state other than the default (Wisconsin). EJScreen is a single national
+file, downloaded once regardless of state. Contextual monitor points no
+longer come from a per-state agency download (see src/ingest_monitors.py,
+which reads the already-cached national AQS daily files instead) -- this
+module no longer downloads Wisconsin DNR's ArcGIS layer.
 """
 from __future__ import annotations
 
+import argparse
 import csv
 import hashlib
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
+
+from src.states import StateConfig, get_state
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RAW_DIR = REPO_ROOT / "data" / "raw"
 METADATA_DIR = REPO_ROOT / "data" / "metadata"
 INGEST_LOG = METADATA_DIR / "ingest_log.csv"
 
-# Every URL below is Wisconsin-specific (state name/FIPS baked directly into
-# the path or filename, not a template) -- see README.md's "Multi-state
-# roadmap" section for what a second state would need here. Not parameterized
-# in this pass: each source's URL scheme is a little different per state
-# (e.g. SVI's state-name-in-path vs. TIGER's FIPS-in-filename), so a generic
-# STATE_FIPS/STATE_NAME substitution here would be more guesswork than
-# reuse until a second state is actually being onboarded.
-SVI_URL = "https://svi.cdc.gov/Documents/Data/2022/csv/states/Wisconsin.csv"
-TIGER_TRACT_URL = "https://www2.census.gov/geo/tiger/TIGER2022/TRACT/tl_2022_55_tract.zip"
+TIGER_YEAR = 2022
+SVI_YEAR = 2022
+
 # EJScreen 2.3 was removed from EPA's own site in Feb 2025 (see methodology.md).
 # Sourced instead from the Harvard Dataverse mirror, doi:10.7910/DVN/RLR5AX.
+# National in scope -- every state's PM2.5 rows are in this one file.
 EJSCREEN_URL = "https://dataverse.harvard.edu/api/access/datafile/10775973"
-DNR_MONITORS_QUERY_URL = (
-    "https://dnrmaps.wi.gov/arcgis/rest/services/AM_WARP_MAP/AM_MONITORS_WTM_Int/"
-    "MapServer/0/query"
-)
-COUNTY_FIPS_URL = "https://www2.census.gov/geo/docs/reference/codes2020/cou/st55_wi_cou2020.txt"
+EJSCREEN_FILENAME = "ejscreen_2024_tract_statepct_national.csv"
 
-SOURCES = [
-    {
-        "filename": "svi_2022_wisconsin.csv",
-        "url": SVI_URL,
-        "description": "CDC/ATSDR SVI 2022, Wisconsin, census tract",
-    },
-    {
-        "filename": "tl_2022_55_tract.zip",
-        "url": TIGER_TRACT_URL,
-        "description": "Census TIGER/Line 2022 Wisconsin census tract geometries",
-    },
-    {
-        "filename": "ejscreen_2024_tract_statepct_national.csv",
-        "url": EJSCREEN_URL,
-        "description": (
-            "EJScreen 2.3 tract-level indicators (national), Harvard Dataverse "
-            "mirror of EPA data removed from epa.gov in Feb 2025"
-        ),
-    },
-    {
-        "filename": "st55_wi_cou2020.txt",
-        "url": COUNTY_FIPS_URL,
-        "description": "Census Bureau 2020 county FIPS-to-name reference, Wisconsin",
-    },
-]
+
+def svi_url(state: StateConfig) -> str:
+    return f"https://svi.cdc.gov/Documents/Data/{SVI_YEAR}/csv/states/{state.svi_name()}.csv"
+
+
+def tiger_tract_url(state: StateConfig, year: int = TIGER_YEAR) -> str:
+    return f"https://www2.census.gov/geo/tiger/TIGER{year}/TRACT/tl_{year}_{state.fips}_tract.zip"
+
+
+def county_fips_url(state: StateConfig) -> str:
+    return (
+        "https://www2.census.gov/geo/docs/reference/codes2020/cou/"
+        f"st{state.fips}_{state.abbr.lower()}_cou2020.txt"
+    )
+
+
+def state_sources(state: StateConfig) -> list[dict]:
+    return [
+        {
+            "filename": f"svi_{SVI_YEAR}_{state.abbr.lower()}.csv",
+            "url": svi_url(state),
+            "description": f"CDC/ATSDR SVI {SVI_YEAR}, {state.name}, census tract",
+        },
+        {
+            "filename": f"tl_{TIGER_YEAR}_{state.fips}_tract.zip",
+            "url": tiger_tract_url(state),
+            "description": f"Census TIGER/Line {TIGER_YEAR} {state.name} census tract geometries",
+        },
+        {
+            "filename": f"st{state.fips}_{state.abbr.lower()}_cou2020.txt",
+            "url": county_fips_url(state),
+            "description": f"Census Bureau 2020 county FIPS-to-name reference, {state.name}",
+        },
+    ]
 
 
 def sha256_of(path: Path) -> str:
@@ -80,14 +90,6 @@ def download_file(url: str, dest: Path, headers: dict | None = None) -> None:
                 f.write(chunk)
 
 
-def download_dnr_monitors(dest: Path) -> None:
-    """Snapshots the WI DNR 'All Monitors' air monitoring layer as raw GeoJSON."""
-    params = {"where": "1=1", "outFields": "*", "f": "geojson"}
-    resp = requests.get(DNR_MONITORS_QUERY_URL, params=params, timeout=60)
-    resp.raise_for_status()
-    dest.write_text(resp.text, encoding="utf-8")
-
-
 def append_ingest_log(rows: list[dict]) -> None:
     METADATA_DIR.mkdir(parents=True, exist_ok=True)
     file_exists = INGEST_LOG.exists()
@@ -101,13 +103,31 @@ def append_ingest_log(rows: list[dict]) -> None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--state", default="WI", help="State abbreviation, e.g. WI, MN")
+    args = parser.parse_args()
+    state = get_state(args.state)
+
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     METADATA_DIR.mkdir(parents=True, exist_ok=True)
 
     log_rows = []
+    sources = state_sources(state) + [
+        {
+            "filename": EJSCREEN_FILENAME,
+            "url": EJSCREEN_URL,
+            "description": (
+                "EJScreen 2.3 tract-level indicators (national), Harvard Dataverse "
+                "mirror of EPA data removed from epa.gov in Feb 2025"
+            ),
+        }
+    ]
 
-    for source in SOURCES:
+    for source in sources:
         dest = RAW_DIR / source["filename"]
+        if dest.exists() and source["filename"] == EJSCREEN_FILENAME:
+            print(f"Skipping {source['filename']} (already downloaded, national file)")
+            continue
         print(f"Downloading {source['filename']} ...")
         download_file(source["url"], dest)
         log_rows.append(
@@ -121,22 +141,9 @@ def main() -> None:
         )
         print(f"  -> {dest} ({dest.stat().st_size:,} bytes)")
 
-    dnr_dest = RAW_DIR / "wi_dnr_air_monitors_snapshot.geojson"
-    print("Downloading WI DNR air monitors snapshot ...")
-    download_dnr_monitors(dnr_dest)
-    log_rows.append(
-        {
-            "filename": dnr_dest.name,
-            "source_url": DNR_MONITORS_QUERY_URL,
-            "description": "WI DNR Air Management Data Viewer, 'All Monitors' layer snapshot",
-            "downloaded_at_utc": datetime.now(timezone.utc).isoformat(),
-            "sha256": sha256_of(dnr_dest),
-        }
-    )
-    print(f"  -> {dnr_dest} ({dnr_dest.stat().st_size:,} bytes)")
-
-    append_ingest_log(log_rows)
-    print(f"\nLogged {len(log_rows)} downloads to {INGEST_LOG}")
+    if log_rows:
+        append_ingest_log(log_rows)
+        print(f"\nLogged {len(log_rows)} downloads to {INGEST_LOG}")
 
 
 if __name__ == "__main__":

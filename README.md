@@ -1,9 +1,12 @@
-# Wisconsin Environmental Health Explorer
+# Regional Environmental Health Explorer
 
 An interactive GIS screening tool combining publicly reported environmental
 indicators with CDC/ATSDR Social Vulnerability Index (SVI) context, at the
-Wisconsin census-tract level, to help analysts identify tracts that may merit
-further review, community engagement, or policy attention.
+census-tract level, to help analysts identify tracts that may merit further
+review, community engagement, or policy attention. Built and validated on
+Wisconsin first; now piloting Minnesota as the first additional state (see
+"Multi-state rollout" below) using the same indicators and the same
+state-relative screening methodology.
 
 > This explorer is a descriptive screening tool. It does not estimate individual
 > exposure, diagnose disease, establish causality, rank community worthiness, or
@@ -49,11 +52,11 @@ The visible screening tool stands on Stage One alone — the LUR pilots are a
 documented research appendix, not a second product layer:
 
 ```
-Validated tract-level public indicator
+Validated tract-level public indicators (PM2.5, cropland/pastureland share, wetland extent)
         +
-CDC/ATSDR SVI contextual percentile
+CDC/ATSDR SVI contextual percentile (state-relative screening, per state)
         +
-Wisconsin DNR monitor/facility context
+EPA AQS air-monitor contextual points
         +
 Source, year, coverage, and limitations metadata
         =
@@ -70,29 +73,44 @@ py -3.12 -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
 ```
 
-## Running the Stage One pipeline
+## Running the pipeline (per state)
+
+Every step below takes `--state <ABBR>` (default `WI`); the abbreviations and
+FIPS codes onboardable today are defined in `src/states.py`. Run this full
+sequence once per state you want in the app:
 
 ```bash
-.venv\Scripts\python src\ingest.py
-.venv\Scripts\python src\clean_svi.py
-.venv\Scripts\python src\clean_indicator.py
-.venv\Scripts\python -m src.ingest_cropland
-.venv\Scripts\python -m src.ingest_wetlands
-.venv\Scripts\python -m src.spatial_join
-.venv\Scripts\python src\metrics.py
-.venv\Scripts\python src\map_layers.py
+.venv\Scripts\python -m src.ingest --state WI
+.venv\Scripts\python -m src.clean_svi --state WI
+.venv\Scripts\python -m src.clean_indicator --state WI
+.venv\Scripts\python -m src.ingest_cropland --state WI
+.venv\Scripts\python -m src.ingest_wetlands --state WI
+.venv\Scripts\python -m src.ingest_monitors --state WI
+.venv\Scripts\python -m src.spatial_join --state WI
 ```
 
 `ingest_cropland.py` and `ingest_wetlands.py` require the GEE service-account
 key (`.env/*.json`, see below) and pull tract-level agricultural-pressure and
-wetland-extent indicators via `src/gee_polygon_utils.py`. `spatial_join.py`
-reads every indicator file present in `data/processed/` and concatenates them
-into one long-format screening view — run as `-m src.spatial_join` (not
-`python src\spatial_join.py`) since it now imports from `src.validate`.
+wetland-extent indicators via `src/gee_polygon_utils.py` (both are CONUS/
+global-coverage datasets — no new external source needed per state).
+`ingest_monitors.py` needs no download at all: it reads the national AQS
+daily files already cached by `src/ingest_ground_truth.py`, filtered to the
+target state. `spatial_join.py`'s last step always rebuilds the **combined**
+`tract_screening_view.parquet` from every state's files found in
+`data/processed/`, so running it for a new state doesn't lose previously
+onboarded states — each state's percentiles stay relative to its own tracts
+only (never pooled across states).
 
-Outputs land in `data/processed/`: geometry/SVI/indicator Parquet/GeoParquet
-tables (now three indicator files: PM2.5, cropland, wetlands), a summary
-statistics CSV, and two static PNGs (choropleth + scatterplot).
+Every module is run as `-m src.<module>` (not `python src\<module>.py`) since
+they import from `src.states`/`src.validate`, which need the repo root on
+`sys.path`.
+
+Onboarded today: **Wisconsin, Minnesota**. Configured in `src/states.py` but
+not yet run: North Dakota, South Dakota, Michigan, Iowa, Illinois — onboard
+one with the same 7-command sequence above.
+
+Run `src\metrics.py` and `src\map_layers.py` (WI-only static exploratory
+plots, unaffected by the multi-state work) separately if needed.
 
 ## Running the interactive app
 
@@ -213,37 +231,56 @@ data/raw/          original downloads, never modified (gitignored; regenerate vi
 data/processed/    cleaned Parquet/GeoParquet tables, summary stats, static plots, calibration outputs
 data/metadata/     data dictionary + ingest log (provenance/checksums)
 notebooks/         end-to-end exploration and validation notebook
-src/               pipeline modules (ingest, clean, join, validate, metrics, maps, satellite calibration)
+src/               pipeline modules (states registry, ingest, clean, join, validate, metrics, maps, satellite calibration)
 app/               Streamlit app (streamlit_app.py entry, components/ for map/table/scatter/legend/appendix)
 tests/             pytest validation suite
 .env/              GEE service-account key (gitignored, not committed)
 ```
 
-## Multi-state roadmap
+## Multi-state rollout
 
-Wisconsin is currently hardcoded end-to-end. `app/config.py` and
-`src/validate.py`'s `STATE_FIPS`/`STATE_NAME`/`STATE_ABBR` constants are a
-first, deliberately minimal step (naming, not function) — the sidebar's
-"State" selector is a disabled placeholder, not a working switch. What a
-second state would actually need, not yet built:
+The screening pipeline (tracts, SVI, PM2.5, cropland/pastureland, wetlands,
+AQS monitor points, and the combined screening view) is fully parameterized
+by `src/states.py` — every module in the "Running the pipeline" section above
+takes `--state <ABBR>`, and the app's sidebar "State" selector is a real
+filter driven by whichever states exist in `tract_screening_view.parquet`.
 
-- `src/ingest.py`'s per-source download URLs and output filenames are
-  Wisconsin-specific literals, not a template (each source's URL scheme
-  differs enough — state name in path vs. FIPS in filename — that a generic
-  substitution would be guesswork before a second state is actually being
-  onboarded).
-- `src/validate.py::check_wisconsin_fips_prefix` (and its enforced test,
-  `tests/test_geography.py::test_wisconsin_fips_prefix`) hard-fails on any
-  non-WI GEOID — correct for a single-state pipeline, but would need to
-  become state-parameterized.
-- The LUR pipeline's metric buffering uses `EPSG:3070` (Wisconsin Transverse
-  Mercator) — accurate only within/near Wisconsin; a second state needs its
-  own suitable projected CRS.
-- `indicator_percentile_wi`/`concern_percentile_wi` are computed relative to
-  Wisconsin's own tracts. Multi-state needs an explicit decision: state-
-  relative per state, or one national-relative percentile across all states.
+**Live today**: Wisconsin (validated, original state) and Minnesota (pilot,
+confirms the parameterized pipeline generalizes correctly — same schema, same
+state-relative percentile ranges, same indicator dropdown).
+
+**Configured but not yet run**: North Dakota, South Dakota, Michigan, Iowa,
+Illinois — FIPS codes are in `src/states.py`; onboarding one is the same
+7-command sequence used for Minnesota. Double-check each state's exact CDC
+SVI filename spelling before running (`StateConfig.svi_csv_name` overrides
+the default `name`-based guess if CDC's naming differs) and verify FIPS codes
+against Census's own reference table as a transcription safety check.
+
+**Design decisions already made, not still open**:
+- **Contextual points** now come from EPA AQS (`src/ingest_monitors.py`),
+  not Wisconsin DNR's ArcGIS layer — one state-agnostic source for every
+  state, Wisconsin included. Trade-off: Wisconsin's contextual layer lost the
+  non-AQS permitted-facility points its old DNR-sourced layer showed; it's
+  ambient air monitors only now, for every state.
+- **Percentiles are state-relative, always** — `indicator_percentile_wi`/
+  `concern_percentile_wi` are ranked within `groupby(["state_abbr",
+  "indicator_name"])`, never pooled across states. Selecting a state in the
+  app shows that state's own self-contained screening view, the same pattern
+  the county filter already uses within a state.
+- **Multi-state map framing**: `app/components/map.py` computes its default
+  view from `gdf.total_bounds()` rather than a fixed state-specific center/
+  zoom constant, so a newly onboarded state's tracts are framed correctly
+  with no per-state map constant to add.
+
+**Still not built for any state beyond Wisconsin/Minnesota**:
+- The LUR research pipeline's metric buffering uses `EPSG:3070` (Wisconsin
+  Transverse Mercator) — accurate only within/near Wisconsin. This is the
+  research/calibration workstream, not the 5 screening indicators, and has
+  not been extended (the user has not asked to run the LUR pilots for other
+  states).
 - No city/place (Census Places) geometry is ingested anywhere — county is
-  currently the finest sub-tract administrative unit available.
+  currently the finest sub-tract administrative unit available, for every
+  state.
 
 ## Project summary
 

@@ -28,7 +28,7 @@ def _ramp_html(title: str, colors: list[str], low_label: str, high_label: str) -
     """
 
 
-def render_legend(indicator_label: str, show_svi_layer: bool, show_dnr_points: bool) -> None:
+def render_legend(indicator_label: str, show_svi_layer: bool, show_monitor_points: bool) -> None:
     st.markdown("**Map legend**")
 
     html_parts = [
@@ -58,11 +58,11 @@ def render_legend(indicator_label: str, show_svi_layer: bool, show_dnr_points: b
         f'<span><span style="display:inline-block; width:12px; height:12px; '
         f'background:{NO_DATA_COLOR}; border-radius:2px; vertical-align:middle;"></span> No data</span>'
     )
-    if show_dnr_points:
+    if show_monitor_points:
         swatch_row += (
             '<span><span style="display:inline-block; width:10px; height:10px; '
             'background:#ffcc00; border:1px solid #555555; border-radius:50%; '
-            'vertical-align:middle;"></span> DNR point (contextual only)</span>'
+            'vertical-align:middle;"></span> Air monitor point (EPA AQS, contextual only)</span>'
         )
     swatch_row += "</div>"
     html_parts.append(swatch_row)

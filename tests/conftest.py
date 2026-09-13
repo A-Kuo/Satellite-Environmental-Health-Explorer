@@ -7,29 +7,39 @@ import pytest
 PROCESSED_DIR = Path(__file__).resolve().parents[1] / "data" / "processed"
 
 
+def _concat_glob(pattern: str, reader):
+    paths = sorted(PROCESSED_DIR.glob(pattern))
+    return pd.concat([reader(p) for p in paths], ignore_index=True)
+
+
 @pytest.fixture(scope="session")
 def tracts_gdf():
-    return gpd.read_parquet(PROCESSED_DIR / "wi_tracts_2022.parquet")
+    return _concat_glob("*_tracts_2022.parquet", gpd.read_parquet)
 
 
 @pytest.fixture(scope="session")
 def svi_df():
-    return pd.read_parquet(PROCESSED_DIR / "wi_svi_2022.parquet")
+    return _concat_glob("*_svi_2022.parquet", pd.read_parquet)
 
 
 @pytest.fixture(scope="session")
 def indicator_df():
-    return pd.read_parquet(PROCESSED_DIR / "wi_pm25_2022.parquet")
+    return _concat_glob("*_pm25_2022.parquet", pd.read_parquet)
 
 
 @pytest.fixture(scope="session")
 def cropland_df():
-    return pd.read_parquet(PROCESSED_DIR / "wi_cropland_2022.parquet")
+    return _concat_glob("*_cropland_2022.parquet", pd.read_parquet)
 
 
 @pytest.fixture(scope="session")
 def wetlands_df():
-    return pd.read_parquet(PROCESSED_DIR / "wi_wetlands_2022.parquet")
+    return _concat_glob("*_wetlands_2022.parquet", pd.read_parquet)
+
+
+@pytest.fixture(scope="session")
+def monitor_points_df():
+    return _concat_glob("*_monitor_points.parquet", pd.read_parquet)
 
 
 @pytest.fixture(scope="session")

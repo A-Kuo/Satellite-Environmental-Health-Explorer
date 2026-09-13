@@ -1,19 +1,21 @@
-"""Cleans the raw CDC/ATSDR SVI 2022 Wisconsin tract CSV into the
+"""Cleans the raw CDC/ATSDR SVI 2022 per-state tract CSV into the
 social_vulnerability schema described in agent.md.
 """
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+from src.states import StateConfig, get_state
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
-RAW_PATH = REPO_ROOT / "data" / "raw" / "svi_2022_wisconsin.csv"
-OUT_PATH = REPO_ROOT / "data" / "processed" / "wi_svi_2022.parquet"
+RAW_DIR = REPO_ROOT / "data" / "raw"
+PROCESSED_DIR = REPO_ROOT / "data" / "processed"
 
 SVI_YEAR = 2022
-SOURCE_URL = "https://svi.cdc.gov/Documents/Data/2022/csv/states/Wisconsin.csv"
 
 COLUMN_MAP = {
     "RPL_THEMES": "overall_svi_percentile",
@@ -24,7 +26,7 @@ COLUMN_MAP = {
 }
 
 
-def clean_svi(raw_path: Path = RAW_PATH) -> pd.DataFrame:
+def clean_svi(state: StateConfig, raw_path: Path) -> pd.DataFrame:
     df = pd.read_csv(raw_path, dtype={"FIPS": str})
 
     df["geoid"] = df["FIPS"].str.zfill(11)
@@ -34,7 +36,9 @@ def clean_svi(raw_path: Path = RAW_PATH) -> pd.DataFrame:
 
     out = df[["geoid", *percentile_cols]].rename(columns=COLUMN_MAP)
     out["svi_year"] = SVI_YEAR
-    out["source_url"] = SOURCE_URL
+    out["source_url"] = (
+        f"https://svi.cdc.gov/Documents/Data/{SVI_YEAR}/csv/states/{state.svi_name()}.csv"
+    )
 
     ordered_cols = [
         "geoid",
@@ -50,10 +54,17 @@ def clean_svi(raw_path: Path = RAW_PATH) -> pd.DataFrame:
 
 
 def main() -> None:
-    OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    out = clean_svi()
-    out.to_parquet(OUT_PATH, index=False)
-    print(f"Wrote {len(out):,} rows -> {OUT_PATH}")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--state", default="WI", help="State abbreviation, e.g. WI, MN")
+    args = parser.parse_args()
+    state = get_state(args.state)
+
+    raw_path = RAW_DIR / f"svi_2022_{state.abbr.lower()}.csv"
+    out_path = PROCESSED_DIR / f"{state.abbr.lower()}_svi_2022.parquet"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out = clean_svi(state, raw_path)
+    out.to_parquet(out_path, index=False)
+    print(f"Wrote {len(out):,} rows -> {out_path}")
 
 
 if __name__ == "__main__":

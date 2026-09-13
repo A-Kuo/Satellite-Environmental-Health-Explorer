@@ -1,7 +1,16 @@
 # Data Dictionary — Stage One
 
-Wisconsin Environmental Health Explorer. All tables are keyed by `geoid`, the
+Regional Environmental Health Explorer. All tables are keyed by `geoid`, the
 11-digit Census tract GEOID (state(2) + county(3) + tract(6)), zero-padded.
+
+**Multi-state naming convention**: every per-state processed file is named
+`{state_abbr_lowercase}_<table>_2022.parquet` (e.g. `wi_tracts_2022.parquet`,
+`mn_svi_2022.parquet`). `src/states.py` is the registry of onboardable states
+(FIPS codes, names); `tract_screening_view.parquet` is the one exception —
+it's always the **combined** multi-state file, concatenated from every
+onboarded state's tables, carrying `state_abbr`/`state_name` columns so the
+app can filter to one state at a time. Percentiles in the screening view are
+always computed within each state's own tracts, never pooled across states.
 
 > This explorer is a descriptive screening tool. It does not estimate individual
 > exposure, diagnose disease, establish causality, rank community worthiness, or
@@ -9,7 +18,7 @@ Wisconsin Environmental Health Explorer. All tables are keyed by `geoid`, the
 > review reflect the selected public indicators and analytic assumptions, not a
 > definitive measure of risk or harm.
 
-## `geographies` — `data/processed/wi_tracts_2022.parquet`
+## `geographies` — `data/processed/{state}_tracts_2022.parquet`
 
 | Field | Type | Description |
 |---|---|---|
@@ -19,12 +28,14 @@ Wisconsin Environmental Health Explorer. All tables are keyed by `geoid`, the
 | `geometry` | geometry (Polygon) | CRS EPSG:4269 (NAD83) |
 | `county_name` | string | e.g. "Outagamie County" |
 | `county_fips` | string | 5-digit state(2)+county(3) |
+| `state_abbr` | string | e.g. `"WI"`, `"MN"` |
+| `state_name` | string | e.g. `"Wisconsin"`, `"Minnesota"` |
 
-- Source: Census Bureau TIGER/Line 2022, Wisconsin census tracts.
-  `https://www2.census.gov/geo/tiger/TIGER2022/TRACT/tl_2022_55_tract.zip`
-- County names: Census Bureau 2020 county FIPS reference,
-  `https://www2.census.gov/geo/docs/reference/codes2020/cou/st55_wi_cou2020.txt`
-- Rows: 1,542 Wisconsin census tracts. No missing values.
+- Source: Census Bureau TIGER/Line 2022 census tracts, per state.
+  `https://www2.census.gov/geo/tiger/TIGER2022/TRACT/tl_2022_{fips}_tract.zip`
+- County names: Census Bureau 2020 county FIPS reference, per state.
+  `https://www2.census.gov/geo/docs/reference/codes2020/cou/st{fips}_{abbr}_cou2020.txt`
+- Rows: 1,542 Wisconsin census tracts; 1,505 Minnesota census tracts. No missing values.
 
 ## `social_vulnerability` — `data/processed/wi_svi_2022.parquet`
 
@@ -106,42 +117,50 @@ worth screening for, the opposite of every other indicator in this pipeline.
 See `LOW_IS_CONCERN_INDICATORS` in `src/spatial_join.py` and
 `concern_percentile_wi` below.
 
-## `monitor_or_facility_points` — `data/processed/wi_dnr_points.parquet`
+## `monitor_points` — `data/processed/{state}_monitor_points.parquet`
+
+Built by `src/ingest_monitors.py` from EPA AQS daily data (replaces an
+earlier Wisconsin-DNR-specific ArcGIS layer — see methodology.md's
+"Multi-state rollout" section for why and the trade-off it accepted).
 
 | Field | Type | Description |
 |---|---|---|
-| `point_id` | string | WI DNR `OBJECTID` |
-| `name` | string | Monitoring site name |
-| `point_type` | string | always `"air_monitor"` for Stage One |
+| `point_id` | string | AQS site ID: state(2)+county(3)+site(4) |
+| `name` | string | `"AQS Site {point_id}"` (AQS's daily files don't carry a human site name) |
+| `point_type` | string | always `"air_monitor"` |
 | `latitude` | float | WGS84 (EPSG:4326) |
 | `longitude` | float | WGS84 (EPSG:4326) |
-| `pollutant_or_permit_type` | string | comma-separated list of pollutants actively monitored at the site (e.g. "O3, PM2.5") |
-| `reporting_year` | int | year this snapshot of the live layer was pulled — **not** a specific reporting/compliance year for the site (see note below) |
-| `source_url` | string | WI DNR ArcGIS REST service URL |
+| `pollutant_or_permit_type` | string | comma-separated list of the 4 pollutants (NO2, SO2, CO, PM2.5) monitored at the site in 2022 |
+| `reporting_year` | int | `2022` — the actual data year, not a live-snapshot pull date |
+| `source_url` | string | EPA AQS airdata page |
+| `state_abbr` | string | e.g. `"WI"`, `"MN"` |
 
-- Source: WI DNR Air Management Data Viewer, "All Monitors" layer.
-  `https://dnrmaps.wi.gov/arcgis/rest/services/AM_WARP_MAP/AM_MONITORS_WTM_Int/MapServer/0`
-- This is a **live, current-state** layer (active monitoring sites at time of
-  download), not a historical annual dataset — `reporting_year` records only the
-  snapshot date, and should not be read as "monitoring occurred in year X."
+- Source: EPA AQS daily pre-generated files, already cached at
+  `data/raw/aqs_daily_{42101,42401,42602,88101}_2022.zip` from the satellite
+  calibration workstream — no new download needed for a new state, just a
+  different `State Code` filter.
 - Contextual point layer only. Do not imply that nearby tracts have measured
   concentrations equal to a monitor's readings.
-- Rows: 40 active monitoring sites statewide.
+- Rows: 23 Wisconsin sites, 28 Minnesota sites (2022 AQS ambient air monitors
+  only — fewer than the earlier WI DNR layer's 40 points, which also
+  included non-AQS permitted-facility points no longer shown).
 
 ## Derived Screening View — `data/processed/tract_screening_view.parquet`
 
 | Field | Type | Description |
 |---|---|---|
 | `geoid` | string | 11-digit Census tract GEOID |
+| `state_abbr` | string | e.g. `"WI"`, `"MN"` — from `geographies` |
+| `state_name` | string | e.g. `"Wisconsin"`, `"Minnesota"` — from `geographies` |
 | `geography_name` | string | from `geographies` |
 | `county_name` | string | from `geographies` |
-| `selected_indicator` | string | one of `"PM2.5 Annual Concentration"`, `"Row-Crop Cultivation Share (Corn & Soybean)"`, `"Pastureland Share (Dairy-Associated)"`, `"Wetland & Surface Water Extent"` — the view is **long format**, one row per (tract, indicator) |
+| `selected_indicator` | string | one of `"PM2.5 Annual Concentration"`, `"Row-Crop Cultivation Share (Corn & Soybean)"`, `"Pastureland Share (Dairy-Associated)"`, `"Wetland & Surface Water Extent"` — the view is **long format**, one row per (state, tract, indicator) |
 | `indicator_value` | float | from `environmental_indicator`, in that indicator's own unit |
-| `indicator_percentile_wi` | float (0–1) | **Wisconsin-relative** percentile rank of `indicator_value`, computed via `pandas.rank(pct=True)` **within each indicator's own distribution** (`groupby("indicator_name")`), not across mixed indicators |
+| `indicator_percentile_wi` | float (0–1) | **state-relative** percentile rank of `indicator_value`, computed via `pandas.rank(pct=True)` **within each (state, indicator) group** (`groupby(["state_abbr", "indicator_name"])`) — never pooled across states or across indicators. (Column name predates multi-state support; kept as-is rather than a breaking rename.) |
 | `concern_percentile_wi` | float (0–1) | `indicator_percentile_wi`, direction-normalized so a **high value always means "more concerning"** — equal to `indicator_percentile_wi` for most indicators, or `1 - indicator_percentile_wi` for indicators in `LOW_IS_CONCERN_INDICATORS` (currently only wetland/surface-water extent). `screening_flag` and the app's map/scatter coloring use this column, never the raw `indicator_percentile_wi` |
 | `overall_svi_percentile` | float (0–1) | from `social_vulnerability`, national-relative as published |
 | `data_coverage_flag` | string | from `environmental_indicator` |
-| `screening_flag` | bool | `True` only if both `concern_percentile_wi` and `overall_svi_percentile` are ≥ 0.75 |
+| `screening_flag` | bool | `True` only if both `concern_percentile_wi` and `overall_svi_percentile` are ≥ 0.75 (state-relative threshold — a Minnesota flag and a Wisconsin flag are each 75th-percentile-within-their-own-state, not compared to each other) |
 | `screening_rationale` | string | plain-language explanation of the flag, always framed as "for analyst review," never as a risk/harm determination |
 | `last_updated` | string | ISO date the view was built |
 | `geometry` | geometry (Polygon) | from `geographies`, EPSG:4269 |
@@ -149,11 +168,12 @@ See `LOW_IS_CONCERN_INDICATORS` in `src/spatial_join.py` and
 No column in this table (or any other) is named `risk_score`, `priority_score`, or
 `harm_score` — enforced by `tests/test_validation.py::test_no_risk_score_column`.
 
-- Rows: 1,542 tracts × 4 indicators = 6,168 (long format, one row per
-  tract-indicator pair). The originally-documented 89-tract PM2.5 flag count
-  (~5.8% of tracts, under the ≥75th-percentile-on-both-axes rule) still holds
-  for the PM2.5 subset; other indicators flag independently within their own
-  distribution.
+- Rows: 6,168 Wisconsin (1,542 tracts × 4 indicators) + 6,020 Minnesota
+  (1,505 tracts × 4 indicators) = 12,188 (long format, one row per
+  state-tract-indicator triple). The originally-documented 89-tract Wisconsin
+  PM2.5 flag count (~5.8% of WI tracts) still holds; Minnesota and every
+  other indicator/state combination flags independently within its own
+  (state, indicator) distribution.
 
 ## `data/metadata/ingest_log.csv`
 

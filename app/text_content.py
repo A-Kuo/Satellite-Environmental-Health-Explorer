@@ -14,17 +14,21 @@ DISCLAIMER_BANNER = (
 )
 
 BASIS_MISMATCH_NOTE = (
-    "Indicator percentile is Wisconsin-relative; SVI percentile is national-relative. "
-    "These are not on the same reference frame. Map color and the review table's "
-    "\"relative concern\" column are direction-normalized per indicator (see Methods) "
-    "so a high value always means more concern, even for protective indicators."
+    "Indicator percentile is state-relative (ranked only against the selected "
+    "state's own tracts); SVI percentile is national-relative. These are not on "
+    "the same reference frame. Map color and the review table's \"relative "
+    "concern\" column are direction-normalized per indicator (see Methods) so a "
+    "high value always means more concern, even for protective indicators."
 )
 
 PURPOSE_AND_BOUNDARY = """
-The Wisconsin Environmental Health Explorer is a **descriptive screening tool**
-built for Clean Wisconsin analysts preparing county-level environmental-health
-briefings. It combines publicly reported environmental-exposure indicators with
-CDC/ATSDR Social Vulnerability Index (SVI) context at the census-tract level.
+This Environmental Health Explorer is a **descriptive screening tool**,
+originally built for Clean Wisconsin analysts preparing county-level
+environmental-health briefings and since piloted in Minnesota using the same
+indicators and methodology. It combines publicly reported environmental-
+exposure indicators with CDC/ATSDR Social Vulnerability Index (SVI) context
+at the census-tract level, with percentiles always computed relative to the
+selected state's own tracts, never pooled across states.
 
 > This explorer is a descriptive screening tool. It does not estimate individual
 > exposure, diagnose disease, establish causality, rank community worthiness, or
@@ -34,12 +38,12 @@ CDC/ATSDR Social Vulnerability Index (SVI) context at the census-tract level.
 """
 
 DATA_SOURCES_TABLE = [
-    {"Table": "Geometries", "Source": "Census TIGER/Line 2022", "Resolution": "Census tract, WI", "Year": "2022", "Unit": "—"},
-    {"Table": "Social vulnerability", "Source": "CDC/ATSDR SVI 2022", "Resolution": "Census tract, WI", "Year": "2022", "Unit": "percentile, 0–1"},
-    {"Table": "PM2.5", "Source": "EPA EJScreen 2.3, via Harvard Dataverse mirror", "Resolution": "Census tract, WI", "Year": "2022", "Unit": "µg/m³, modeled"},
-    {"Table": "Row-crop & pastureland share", "Source": "USDA NASS Cropland Data Layer, via Google Earth Engine", "Resolution": "Census tract, WI", "Year": "2022", "Unit": "fraction of tract area"},
-    {"Table": "Wetland & surface water extent", "Source": "Google Dynamic World V1, via Google Earth Engine", "Resolution": "Census tract, WI", "Year": "2022 (Jun–Sep composite)", "Unit": "fraction of tract area"},
-    {"Table": "Contextual points", "Source": "WI DNR Air Management Data Viewer, \"All Monitors\"", "Resolution": "Point, statewide", "Year": "live snapshot", "Unit": "—"},
+    {"Table": "Geometries", "Source": "Census TIGER/Line 2022", "Resolution": "Census tract, selected state", "Year": "2022", "Unit": "—"},
+    {"Table": "Social vulnerability", "Source": "CDC/ATSDR SVI 2022", "Resolution": "Census tract, selected state", "Year": "2022", "Unit": "percentile, 0–1"},
+    {"Table": "PM2.5", "Source": "EPA EJScreen 2.3, via Harvard Dataverse mirror", "Resolution": "Census tract, selected state", "Year": "2022", "Unit": "µg/m³, modeled"},
+    {"Table": "Row-crop & pastureland share", "Source": "USDA NASS Cropland Data Layer, via Google Earth Engine", "Resolution": "Census tract, selected state", "Year": "2022", "Unit": "fraction of tract area"},
+    {"Table": "Wetland & surface water extent", "Source": "Google Dynamic World V1, via Google Earth Engine", "Resolution": "Census tract, selected state", "Year": "2022 (Jun–Sep composite)", "Unit": "fraction of tract area"},
+    {"Table": "Contextual points", "Source": "EPA AQS ambient air monitor sites", "Resolution": "Point, statewide", "Year": "2022", "Unit": "—"},
 ]
 
 EJSCREEN_CAVEAT = """
@@ -56,11 +60,11 @@ indicator unless official access is restored.
 PERCENTILE_BASIS_MISMATCH = """
 `overall_svi_percentile` is **national-relative**, as published by CDC/ATSDR (SVI
 does not publish a state-relative percentile). `indicator_percentile_wi` is
-**Wisconsin-relative**, computed directly in this pipeline as a rank of the raw
-indicator value within that indicator's own distribution across all 1,542 WI
-tracts (percentile is never computed across different indicators together). A
-tract flagged for review is high on both reference frames at once — not on a
-single, shared percentile scale.
+**relative to the selected state's own tracts**, computed directly in this
+pipeline as a rank of the raw indicator value within that state's tracts and
+that indicator's own distribution (never pooled across states or across
+different indicators). A tract flagged for review is high on both reference
+frames at once — not on a single, shared percentile scale.
 
 **Indicator direction:** most indicators are "high is concern" (more PM2.5, more
 row-crop or pastureland intensity = more concern), but wetland/surface-water
@@ -90,9 +94,10 @@ WHAT_THIS_IS_NOT = [
     "Not a ranking of community worth or need — the screening flag marks tracts that may warrant further review, not a priority order.",
 ]
 
-DNR_CONTEXTUAL_NOTE = (
-    "DNR points are a contextual layer only — they are not joined to any tract, "
-    "and nearby tracts should not be assumed to share a monitor's readings."
+MONITOR_CONTEXTUAL_NOTE = (
+    "Air monitor points (EPA AQS) are a contextual layer only — they are not "
+    "joined to any tract, and nearby tracts should not be assumed to share a "
+    "monitor's readings."
 )
 
 RESEARCH_APPENDIX_WARNING = (
@@ -109,6 +114,77 @@ RESEARCH_APPENDIX_BOUNDARY = [
     "Any satellite-layer description implying TROPOMI/MODIS materially improved either model — ablation testing found the opposite.",
     "A map combining either pilot's unvalidated predictions with SVI as if it were a public-action recommendation.",
 ]
+
+MILWAUKEE_DIAGNOSIS_SUMMARY = (
+    "**Is `impervious_pct` acting as a site identifier rather than a real "
+    "predictor?** Confirmed, unambiguously. The SHAP dependence plot below "
+    "shows three perfectly vertical clusters — one per monitor site, since "
+    "`impervious_pct` is a single static value per site with zero within-site "
+    "variation — each with a wildly different SHAP contribution range. With "
+    "only 3 distinct x-values ever seen, the model learned a 3-entry lookup "
+    "table keyed on site identity, not a continuous impervious→NO2 "
+    "relationship. A formal mixed-effects model quantifies this directly: "
+    "**between-site variance accounts for 67% of Milwaukee/NO2's total "
+    "outcome variance** (ICC), vs. 0.5% for Madison/PM2.5. Two-thirds of what "
+    "determines Milwaukee NO2 levels is *which site*, not a relationship any "
+    "model can transfer elsewhere — a structural property of the data (3 "
+    "sites spanning genuinely different urban contexts), not a fixable "
+    "modeling mistake."
+)
+
+MILWAUKEE_FIX_ATTEMPT_SUMMARY = (
+    "The fix attempt (dropping `impervious_pct`, or replacing it with "
+    "multi-scale impervious/road-density/land-cover-mix features at 100m–1km "
+    "buffers) was only a partial success: temporal performance was unaffected "
+    "(confirming `impervious_pct` never carried real temporal signal), and "
+    "site-holdout flipped exactly *one* of three sites positive while the "
+    "other two stayed numerically identical to the full model — the model "
+    "found an equally effective site-identity substitute among the other "
+    "static features. **Conclusion: a 3-monitor network is structurally "
+    "insufficient for spatial interpolation validation in Milwaukee**, not a "
+    "feature-engineering problem still waiting for the right fix."
+)
+
+MADISON_DIAGNOSIS_SUMMARY = (
+    "**Why does the model fail specifically in summer?** The three worst "
+    "rolling-CV folds (June, July, August) are also the three warmest months "
+    "with the shallowest boundary layers and lowest wind speed — the model is "
+    "worse specifically when concentrations are lower and more compressed, a "
+    "regime where the same absolute error costs more R². Two data-quality "
+    "hypotheses (instrument/method changes, an AQS \"Event Type\" flag "
+    "initially suspected of marking wildfire-smoke days) were checked directly "
+    "and ruled out — this looks like a genuine regime-dependent modeling gap, "
+    "not a data artifact. The current feature set doesn't capture whatever "
+    "drives summer PM2.5 variability in Madison as well as it captures the "
+    "cold-season heating-driven inversion pattern it clearly does learn."
+)
+
+MADISON_EXPERIMENT_HYPOTHESES = (
+    "Registered **before** running, so the result is reported as obtained, "
+    "not selected — a single bounded test of two named hypotheses for "
+    "Madison's summer-fold instability, closing the Madison modeling "
+    "workstream regardless of outcome:\n\n"
+    "1. **Secondary-aerosol formation** — Madison's failing folds are the "
+    "warmest, sunniest summer months; photochemical secondary aerosol "
+    "formation is driven by solar radiation, not captured by the existing "
+    "feature set. Proxy: `surface_solar_radiation_downwards` (ERA5-Land).\n"
+    "2. **Wildfire smoke** — 2022 had documented Canadian wildfire smoke "
+    "transport into the Midwest, which the cyclic day-of-year encoding can't "
+    "represent. Proxy: `absorbing_aerosol_index` (Sentinel-5P TROPOMI UV "
+    "Aerosol Index, the standard operational smoke/dust detection product)."
+)
+
+MADISON_EXPERIMENT_RESULT = (
+    "**Result: negative. Neither feature moved the needle.** Both proxies "
+    "extracted with good coverage (solar radiation 100%, aerosol index "
+    "88.4%), ruling out a data-availability excuse. Per-fold, the three "
+    "previously-failing summer folds did not recover — June and August got "
+    "worse, July was essentially unchanged. This closes the Madison PM2.5 "
+    "modeling workstream per the pre-registered stopping rule: any further "
+    "work would need a materially different feature representation (e.g. an "
+    "interaction term, not just an additive one) or more monitor-years of "
+    "data, not another round of single-feature additions."
+)
 
 CALIBRATION_SUMMARY = (
     "Every pollutant's held-out test R² is negative — a model that always predicted "

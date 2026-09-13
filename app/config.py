@@ -1,11 +1,7 @@
-"""State-level constants for the app's UI copy. Multi-state scaffolding is
-intentionally minimal (see README.md's "Multi-state roadmap") -- this file
-lets the UI's Wisconsin-specific wording come from one place rather than
-scattered literals, without implying a second state is actually supported
-yet (the sidebar's state selector, in app/streamlit_app.py, stays a
-disabled placeholder).
+"""App-level defaults. The state shown is now driven by a real sidebar
+selector (app/streamlit_app.py) backed by whichever states exist in
+tract_screening_view.parquet -- this just picks which one is preselected.
 """
 from __future__ import annotations
 
-STATE_NAME = "Wisconsin"
-STATE_ABBR = "WI"
+DEFAULT_STATE_ABBR = "WI"

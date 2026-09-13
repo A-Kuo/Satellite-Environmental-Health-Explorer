@@ -46,3 +46,21 @@ def test_screening_view_has_concern_percentile(screening_df):
     assert "concern_percentile_wi" in screening_df.columns
     valid = screening_df["concern_percentile_wi"].dropna()
     assert valid.between(0, 1).all()
+
+
+def test_screening_view_has_multiple_states(screening_df):
+    """Regression guard: confirms the multi-state combine step in
+    src/spatial_join.py::combine_screening_view actually onboarded more than
+    just Wisconsin."""
+    assert "state_abbr" in screening_df.columns
+    assert screening_df["state_abbr"].nunique() > 1
+
+
+def test_percentiles_are_state_relative(screening_df):
+    """Each state's indicator_percentile_wi must span its own [0, 1] range --
+    percentiles are never pooled across states (src/spatial_join.py's
+    groupby(["state_abbr", "indicator_name"])."""
+    for (state, indicator), group in screening_df.groupby(["state_abbr", "selected_indicator"]):
+        valid = group["indicator_percentile_wi"].dropna()
+        if len(valid):
+            assert valid.max() > 0.9, f"{state}/{indicator}: percentile doesn't reach near 1.0"

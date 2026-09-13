@@ -1,44 +1,34 @@
-"""Builds the geometries table, the DNR monitor points table, and the derived
-tract_screening_view by joining SVI + the environmental indicator onto
-Wisconsin census tract geometries.
+"""Builds the per-state geometries table and the derived multi-state
+tract_screening_view by joining SVI + environmental indicators onto census
+tract geometries.
 
 agent.md's fixed repo structure has no dedicated "clean tracts" module, so
 tract-geometry preparation (from the raw TIGER shapefile) lives here, as the
-first step before the join itself.
+first step before the join itself. Contextual monitor points moved to
+src/ingest_monitors.py (EPA AQS, state-agnostic) -- this module no longer
+builds them.
+
+Run `python -m src.spatial_join --state <ABBR>` per onboarded state: it
+(re)builds that state's tracts file, then always rebuilds the combined
+multi-state tract_screening_view.parquet from every state's tracts/SVI/
+indicator files found on disk -- so each run leaves the combined view
+current, not just that one state's slice.
 """
 from __future__ import annotations
 
-import json
+import argparse
 from datetime import date
 from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
 
-from src.validate import STATE_NAME
+from src.states import StateConfig, get_state
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RAW_DIR = REPO_ROOT / "data" / "raw"
 PROCESSED_DIR = REPO_ROOT / "data" / "processed"
 
-TIGER_ZIP = RAW_DIR / "tl_2022_55_tract.zip"
-COUNTY_FIPS_TXT = RAW_DIR / "st55_wi_cou2020.txt"
-DNR_GEOJSON = RAW_DIR / "wi_dnr_air_monitors_snapshot.geojson"
-
-TRACTS_OUT = PROCESSED_DIR / "wi_tracts_2022.parquet"
-SVI_PATH = PROCESSED_DIR / "wi_svi_2022.parquet"
-# Every available indicator table is concatenated (long format: one row per
-# geoid x indicator_name) before building the screening view. Each entry
-# must follow the environmental_indicator schema (geoid, indicator_name,
-# indicator_year, indicator_value, unit, data_coverage_flag,
-# aggregation_method, source_url). Missing files are skipped so the pipeline
-# still runs before every ingestion script has been run once.
-INDICATOR_PATHS = [
-    PROCESSED_DIR / "wi_pm25_2022.parquet",
-    PROCESSED_DIR / "wi_cropland_2022.parquet",
-    PROCESSED_DIR / "wi_wetlands_2022.parquet",
-]
-DNR_POINTS_OUT = PROCESSED_DIR / "wi_dnr_points.parquet"
 SCREENING_VIEW_OUT = PROCESSED_DIR / "tract_screening_view.parquet"
 
 TARGET_CRS = "EPSG:4269"
@@ -54,16 +44,11 @@ SCREENING_PERCENTILE_THRESHOLD = 0.75
 # both key off concern_percentile_wi, never the raw indicator_percentile_wi.
 LOW_IS_CONCERN_INDICATORS = {"Wetland & Surface Water Extent"}
 
-DNR_SOURCE_URL = (
-    "https://dnrmaps.wi.gov/arcgis/rest/services/AM_WARP_MAP/AM_MONITORS_WTM_Int/MapServer/0"
-)
-POLLUTANT_FIELDS = [
-    "O3", "PM2_5", "PM10", "PMCRS", "SO2", "NO2", "CO", "MET", "PBTSP",
-    "METALS", "NOY", "PAH", "VOC", "NTN", "HG", "AMON", "UFP", "AETH", "AMNET", "MDN",
-]
 
+def build_tracts(state: StateConfig) -> gpd.GeoDataFrame:
+    tiger_zip = RAW_DIR / f"tl_2022_{state.fips}_tract.zip"
+    county_fips_txt = RAW_DIR / f"st{state.fips}_{state.abbr.lower()}_cou2020.txt"
 
-def build_tracts(tiger_zip: Path = TIGER_ZIP, county_fips_txt: Path = COUNTY_FIPS_TXT) -> gpd.GeoDataFrame:
     gdf = gpd.read_file(tiger_zip)
     gdf = gdf.to_crs(TARGET_CRS)
 
@@ -79,61 +64,39 @@ def build_tracts(tiger_zip: Path = TIGER_ZIP, county_fips_txt: Path = COUNTY_FIP
     ]
 
     gdf = gdf.merge(county_names, on="county_fips", how="left")
-    gdf["geography_name"] = gdf["NAMELSAD"] + ", " + gdf["county_name"] + f", {STATE_NAME}"
+    gdf["geography_name"] = gdf["NAMELSAD"] + ", " + gdf["county_name"] + f", {state.name}"
     gdf["geography_type"] = "census_tract"
+    gdf["state_abbr"] = state.abbr
+    gdf["state_name"] = state.name
 
     return gdf[
-        ["geoid", "geography_name", "geography_type", "geometry", "county_name", "county_fips"]
-    ]
-
-
-def build_dnr_points(dnr_geojson: Path = DNR_GEOJSON) -> pd.DataFrame:
-    with open(dnr_geojson, encoding="utf-8") as f:
-        data = json.load(f)
-
-    rows = []
-    for feature in data["features"]:
-        props = feature["properties"]
-        active_pollutants = [
-            field.replace("PM2_5", "PM2.5")
-            for field in POLLUTANT_FIELDS
-            if str(props.get(field, "N/A")).upper() not in ("N/A", "NONE", "")
+        [
+            "geoid", "geography_name", "geography_type", "geometry",
+            "county_name", "county_fips", "state_abbr", "state_name",
         ]
-        rows.append(
-            {
-                "point_id": str(props["OBJECTID"]),
-                "name": props.get("SITE"),
-                "point_type": "air_monitor",
-                "latitude": props.get("LATITUDE"),
-                "longitude": props.get("LONGITUDE"),
-                "pollutant_or_permit_type": ", ".join(active_pollutants) if active_pollutants else None,
-                "reporting_year": date.today().year,
-                "source_url": DNR_SOURCE_URL,
-            }
-        )
-    return pd.DataFrame(rows)
+    ]
 
 
 def build_screening_view(
     tracts: gpd.GeoDataFrame, svi: pd.DataFrame, indicators: pd.DataFrame
 ) -> gpd.GeoDataFrame:
-    """Builds the long-format screening view: one row per (geoid, indicator_name).
+    """Builds the long-format screening view: one row per (state, geoid, indicator_name).
 
-    `indicators` may stack more than one indicator's rows (e.g. PM2.5 +
-    cropland + wetlands, all sharing the environmental_indicator schema) --
-    a plain merge on geoid between the 1-row-per-tract `tracts` table and the
-    N-rows-per-tract `indicators` table expands correctly into long format.
-    Percentile is computed *within* each indicator's own distribution
-    (groupby, not a global rank) so indicators are never compared against
-    each other's raw values.
+    `tracts` may span multiple states (each tagged with its own state_abbr
+    from build_tracts()); `indicators` may stack more than one indicator's
+    rows, all sharing the environmental_indicator schema. A plain merge on
+    geoid expands both dimensions correctly into long format. Percentile is
+    computed *within* each (state, indicator) group -- state-relative,
+    always, per the project's decision to never pool percentiles across
+    states (or across indicators).
     """
     assert tracts.crs is not None and tracts.crs.to_epsg() in (4269, 4326), "Unexpected tract CRS"
 
     merged = tracts.merge(indicators, on="geoid", how="left").merge(svi, on="geoid", how="left")
 
-    merged["indicator_percentile_wi"] = merged.groupby("indicator_name")["indicator_value"].rank(
-        pct=True
-    )
+    merged["indicator_percentile_wi"] = merged.groupby(["state_abbr", "indicator_name"])[
+        "indicator_value"
+    ].rank(pct=True)
 
     # Normalizes indicator direction so a high value always means "more
     # concerning," regardless of whether the underlying indicator itself
@@ -151,19 +114,19 @@ def build_screening_view(
         & (merged["overall_svi_percentile"] >= SCREENING_PERCENTILE_THRESHOLD)
     ).fillna(False)
 
-    merged["screening_rationale"] = merged["screening_flag"].map(
-        {
-            True: (
-                f"Selected because both the environmental indicator and SVI are at or "
-                f"above the {STATE_NAME} 75th percentile. This is a screening flag for "
-                "analyst review, not a health-risk estimate."
-            ),
-            False: (
+    merged["screening_rationale"] = merged.apply(
+        lambda row: (
+            f"Selected because both the environmental indicator and SVI are at or "
+            f"above the {row['state_name']} 75th percentile. This is a screening flag "
+            "for analyst review, not a health-risk estimate."
+            if row["screening_flag"]
+            else (
                 "Not flagged: the environmental indicator and/or SVI percentile for "
-                f"this tract falls below the {STATE_NAME} 75th-percentile screening "
-                "threshold."
-            ),
-        }
+                f"this tract falls below the {row['state_name']} 75th-percentile "
+                "screening threshold."
+            )
+        ),
+        axis=1,
     )
 
     merged["selected_indicator"] = merged["indicator_name"]
@@ -171,6 +134,8 @@ def build_screening_view(
 
     out_cols = [
         "geoid",
+        "state_abbr",
+        "state_name",
         "geography_name",
         "county_name",
         "selected_indicator",
@@ -187,31 +152,49 @@ def build_screening_view(
     return merged[out_cols]
 
 
+def combine_screening_view() -> gpd.GeoDataFrame:
+    """Reads every onboarded state's tracts/SVI/indicator files present in
+    data/processed/ and concatenates them into one multi-state screening
+    view -- the file the app reads."""
+    tract_paths = sorted(PROCESSED_DIR.glob("*_tracts_2022.parquet"))
+    if not tract_paths:
+        raise FileNotFoundError("No *_tracts_2022.parquet files found -- build at least one state first.")
+
+    all_tracts = pd.concat([gpd.read_parquet(p) for p in tract_paths], ignore_index=True)
+    all_tracts = gpd.GeoDataFrame(all_tracts, geometry="geometry", crs=gpd.read_parquet(tract_paths[0]).crs)
+
+    svi_paths = sorted(PROCESSED_DIR.glob("*_svi_2022.parquet"))
+    all_svi = pd.concat([pd.read_parquet(p) for p in svi_paths], ignore_index=True)
+
+    indicator_paths = sorted(
+        p for p in PROCESSED_DIR.glob("*.parquet")
+        if p.name.endswith(("_pm25_2022.parquet", "_cropland_2022.parquet", "_wetlands_2022.parquet"))
+    )
+    all_indicators = pd.concat([pd.read_parquet(p) for p in indicator_paths], ignore_index=True)
+
+    return build_screening_view(all_tracts, all_svi, all_indicators)
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--state", default="WI", help="State abbreviation, e.g. WI, MN")
+    args = parser.parse_args()
+    state = get_state(args.state)
+
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
-    tracts = build_tracts()
-    tracts.to_parquet(TRACTS_OUT, index=False)
-    print(f"Wrote {len(tracts):,} rows -> {TRACTS_OUT}")
+    tracts = build_tracts(state)
+    tracts_out = PROCESSED_DIR / f"{state.abbr.lower()}_tracts_2022.parquet"
+    tracts.to_parquet(tracts_out, index=False)
+    print(f"Wrote {len(tracts):,} rows -> {tracts_out}")
 
-    dnr_points = build_dnr_points()
-    dnr_points.to_parquet(DNR_POINTS_OUT, index=False)
-    print(f"Wrote {len(dnr_points):,} rows -> {DNR_POINTS_OUT}")
-
-    svi = pd.read_parquet(SVI_PATH)
-    available_paths = [p for p in INDICATOR_PATHS if p.exists()]
-    missing_paths = [p for p in INDICATOR_PATHS if not p.exists()]
-    if missing_paths:
-        print(f"Skipping {len(missing_paths)} not-yet-built indicator file(s): "
-              f"{', '.join(p.name for p in missing_paths)}")
-    indicators = pd.concat(
-        [pd.read_parquet(p) for p in available_paths], ignore_index=True
-    )
-    screening_view = build_screening_view(tracts, svi, indicators)
+    screening_view = combine_screening_view()
     screening_view.to_parquet(SCREENING_VIEW_OUT, index=False)
+    n_states = screening_view["state_abbr"].nunique()
     n_indicators = screening_view["selected_indicator"].nunique()
     print(
-        f"Wrote {len(screening_view):,} rows ({n_indicators} indicators) -> {SCREENING_VIEW_OUT}"
+        f"Wrote {len(screening_view):,} rows ({n_states} state(s), {n_indicators} indicators) "
+        f"-> {SCREENING_VIEW_OUT}"
     )
 
 

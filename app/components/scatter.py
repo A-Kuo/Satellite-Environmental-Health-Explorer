@@ -8,12 +8,12 @@ import geopandas as gpd
 import plotly.express as px
 import plotly.graph_objects as go
 
-from app.config import STATE_NAME
-
 SCREENING_COLOR_MAP = {"Flagged for review": "#bd0026", "Not flagged": "#a6bddb"}
 
 
-def build_scatter_figure(gdf: gpd.GeoDataFrame, indicator_label: str = "Indicator value") -> go.Figure:
+def build_scatter_figure(
+    gdf: gpd.GeoDataFrame, indicator_label: str = "Indicator value", state_name: str = "selected state"
+) -> go.Figure:
     df = gdf.dropna(subset=["indicator_value", "overall_svi_percentile"]).copy()
     df["Screening status"] = df["screening_flag"].map(
         {True: "Flagged for review", False: "Not flagged"}
@@ -37,7 +37,7 @@ def build_scatter_figure(gdf: gpd.GeoDataFrame, indicator_label: str = "Indicato
             "indicator_value": f"{indicator_label} (raw value)",
             "overall_svi_percentile": "Overall SVI percentile (national-relative)",
         },
-        title=f"{indicator_label} vs. Social Vulnerability ({STATE_NAME} census tracts)",
+        title=f"{indicator_label} vs. Social Vulnerability ({state_name} census tracts)",
     )
     fig.update_layout(legend_title_text="")
     return fig

@@ -10,17 +10,10 @@ from pathlib import Path
 import geopandas as gpd
 import pandas as pd
 
+from src.states import STATES
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PROCESSED_DIR = REPO_ROOT / "data" / "processed"
-
-# Multi-state scaffolding (intentionally minimal -- see README.md's
-# "Multi-state roadmap" section for what's still WI-specific beyond these
-# named constants: source download URLs, output filenames, the WI-specific
-# projected CRS used for metric buffering in the LUR pipeline, and the
-# Wisconsin-relative percentile semantics).
-STATE_FIPS = "55"
-STATE_NAME = "Wisconsin"
-STATE_ABBR = "WI"
 
 FORBIDDEN_COLUMNS = {"risk_score", "priority_score", "harm_score"}
 MIN_JOIN_COVERAGE = 0.90
@@ -40,8 +33,15 @@ def check_geoid_format(tracts_gdf: gpd.GeoDataFrame) -> None:
     assert tracts_gdf["geoid"].str.match(r"^\d{11}$").all(), "GEOIDs not 11-digit strings"
 
 
-def check_wisconsin_fips_prefix(tracts_gdf: gpd.GeoDataFrame) -> None:
-    assert tracts_gdf["geoid"].str.startswith(STATE_FIPS).all(), f"Non-{STATE_NAME} GEOIDs present"
+def check_geoid_state_prefix(tracts_gdf: gpd.GeoDataFrame, valid_fips: set[str] | None = None) -> None:
+    """Every GEOID's 2-digit state prefix must belong to an onboarded state
+    (src/states.py), not one hardcoded value -- lets tracts from multiple
+    states coexist in the same table."""
+    valid_fips = valid_fips or {s.fips for s in STATES.values()}
+    prefixes = tracts_gdf["geoid"].str[:2]
+    assert prefixes.isin(valid_fips).all(), (
+        f"GEOIDs with unrecognized state prefix present (expected one of {sorted(valid_fips)})"
+    )
 
 
 def check_crs(tracts_gdf: gpd.GeoDataFrame) -> None:
@@ -107,15 +107,22 @@ def missingness_summary(df: pd.DataFrame, table_name: str) -> pd.DataFrame:
 
 
 def main() -> None:
-    tracts = gpd.read_parquet(PROCESSED_DIR / "wi_tracts_2022.parquet")
-    svi = pd.read_parquet(PROCESSED_DIR / "wi_svi_2022.parquet")
-    indicator = pd.read_parquet(PROCESSED_DIR / "wi_pm25_2022.parquet")
+    # Concatenates whatever per-state files are actually present -- same
+    # degrade-gracefully pattern used in src/spatial_join.py::main() -- so
+    # this runs whether one state or several have been onboarded.
+    tract_paths = sorted(PROCESSED_DIR.glob("*_tracts_2022.parquet"))
+    svi_paths = sorted(PROCESSED_DIR.glob("*_svi_2022.parquet"))
+    pm25_paths = sorted(PROCESSED_DIR.glob("*_pm25_2022.parquet"))
+
+    tracts = pd.concat([gpd.read_parquet(p) for p in tract_paths], ignore_index=True)
+    svi = pd.concat([pd.read_parquet(p) for p in svi_paths], ignore_index=True)
+    indicator = pd.concat([pd.read_parquet(p) for p in pm25_paths], ignore_index=True)
     screening = gpd.read_parquet(PROCESSED_DIR / "tract_screening_view.parquet")
 
     check_unique_geoid(tracts)
     check_no_null_geometry(tracts)
     check_geoid_format(tracts)
-    check_wisconsin_fips_prefix(tracts)
+    check_geoid_state_prefix(tracts)
     check_crs(tracts)
     check_join_coverage(screening, tracts)
     check_no_unexplained_missing_geometry(screening)
@@ -124,13 +131,13 @@ def main() -> None:
     check_no_negative_pm25(indicator)
     check_screening_flag_logic(screening)
     check_no_risk_score_column(screening)
-    print("All validation checks passed.\n")
+    print(f"All validation checks passed ({len(tract_paths)} state(s) onboarded).\n")
 
     summaries = pd.concat(
         [
-            missingness_summary(tracts.drop(columns="geometry"), "wi_tracts_2022"),
-            missingness_summary(svi, "wi_svi_2022"),
-            missingness_summary(indicator, "wi_pm25_2022"),
+            missingness_summary(tracts.drop(columns="geometry"), "tracts_2022"),
+            missingness_summary(svi, "svi_2022"),
+            missingness_summary(indicator, "pm25_2022"),
             missingness_summary(screening.drop(columns="geometry"), "tract_screening_view"),
         ],
         ignore_index=True,

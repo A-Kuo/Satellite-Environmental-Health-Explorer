@@ -16,11 +16,17 @@ window cuts the image count roughly in half and keeps runtime for the full
 run time (this is a slow, one-time-per-year ingestion script, not something
 the app runs live).
 
+The Dynamic World pre-filter bounds are computed from whatever tracts are
+passed in (via `.total_bounds`), not a hardcoded rectangle -- an earlier
+version hardcoded Wisconsin's bounding box, which would have silently
+clipped a new state's imagery.
+
 Requires the same GEE service-account key as src/ingest_satellite.py
 (.env/*.json, gitignored).
 """
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import ee
@@ -29,11 +35,10 @@ import pandas as pd
 
 from src.gee_polygon_utils import build_polygon_fc, reduce_categorical_by_polygon
 from src.ingest_satellite import authenticate
+from src.states import get_state
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PROCESSED_DIR = REPO_ROOT / "data" / "processed"
-TRACTS_PATH = PROCESSED_DIR / "wi_tracts_2022.parquet"
-OUT_PATH = PROCESSED_DIR / "wi_wetlands_2022.parquet"
 
 DW_COLLECTION = "GOOGLE/DYNAMICWORLD/V1"
 DW_BAND = "label"
@@ -66,11 +71,12 @@ AGGREGATION_METHOD = (
 
 
 def extract_wetland_fraction(tracts: gpd.GeoDataFrame) -> pd.DataFrame:
-    wi_bounds = ee.Geometry.Rectangle([-93.0, 42.4, -86.2, 47.1])
+    minx, miny, maxx, maxy = tracts.to_crs(epsg=4326).total_bounds
+    state_bounds = ee.Geometry.Rectangle([minx, miny, maxx, maxy])
     dw = (
         ee.ImageCollection(DW_COLLECTION)
         .filterDate(GROWING_SEASON_START, GROWING_SEASON_END)
-        .filterBounds(wi_bounds)
+        .filterBounds(state_bounds)
     )
     composite = dw.select(DW_BAND).mode()
     batches = build_polygon_fc(tracts, "geoid")
@@ -100,13 +106,23 @@ def build_indicator_rows(fractions: pd.DataFrame) -> pd.DataFrame:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--state", default="WI", help="State abbreviation, e.g. WI, MN")
+    args = parser.parse_args()
+    state = get_state(args.state)
+
     authenticate()
-    tracts = gpd.read_parquet(TRACTS_PATH)
-    print(f"Extracting Dynamic World {YEAR} growing-season wetland/water fractions for {len(tracts):,} tracts...")
+    tracts_path = PROCESSED_DIR / f"{state.abbr.lower()}_tracts_2022.parquet"
+    out_path = PROCESSED_DIR / f"{state.abbr.lower()}_wetlands_2022.parquet"
+    tracts = gpd.read_parquet(tracts_path)
+    print(
+        f"Extracting Dynamic World {YEAR} growing-season wetland/water fractions "
+        f"for {state.name} ({len(tracts):,} tracts)..."
+    )
     fractions = extract_wetland_fraction(tracts)
     out = build_indicator_rows(fractions)
-    out.to_parquet(OUT_PATH, index=False)
-    print(f"  -> {OUT_PATH} ({len(out):,} rows)")
+    out.to_parquet(out_path, index=False)
+    print(f"  -> {out_path} ({len(out):,} rows)")
 
 
 if __name__ == "__main__":

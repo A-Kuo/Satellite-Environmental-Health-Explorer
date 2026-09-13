@@ -1,10 +1,10 @@
-"""Cached data access for the Stage Two Streamlit app.
+"""Cached data access for the Streamlit app.
 
-Streamlit re-executes each page (app/streamlit_app.py, app/pages/*.py) as its
-own top-level script, so the repo root is not guaranteed to be on sys.path the
-way pytest's rootdir-based invocation puts it there for src.*. This module
-inserts the repo root once on import so `from src.validate import PROCESSED_DIR`
-works regardless of which script imports data_loader first.
+Streamlit re-executes app/streamlit_app.py as its own top-level script, so
+the repo root is not guaranteed to be on sys.path the way pytest's
+rootdir-based invocation puts it there for src.*. This module inserts the
+repo root once on import so `from src.validate import PROCESSED_DIR` works
+regardless of which script imports data_loader first.
 """
 from __future__ import annotations
 
@@ -32,8 +32,12 @@ def load_screening_view() -> gpd.GeoDataFrame:
 
 
 @st.cache_data(show_spinner=False)
-def load_dnr_points() -> pd.DataFrame:
-    return pd.read_parquet(PROCESSED_DIR / "wi_dnr_points.parquet")
+def load_monitor_points() -> pd.DataFrame:
+    """Concatenates every onboarded state's EPA-AQS-derived monitor points
+    (src/ingest_monitors.py); the app filters to the selected state itself,
+    same pattern as load_screening_view()."""
+    paths = sorted(PROCESSED_DIR.glob("*_monitor_points.parquet"))
+    return pd.concat([pd.read_parquet(p) for p in paths], ignore_index=True)
 
 
 @st.cache_data(show_spinner=False)

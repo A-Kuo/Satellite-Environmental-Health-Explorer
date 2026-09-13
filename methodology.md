@@ -24,7 +24,7 @@ proof of environmental injustice. Fields are never named `risk_score`,
 | Geometries | Census TIGER/Line 2022 | Census tract, WI | 2022 | — |
 | Social vulnerability | CDC/ATSDR SVI 2022 | Census tract, WI | 2022 | percentile, 0–1 |
 | Environmental indicator | EPA EJScreen 2.3 (PM2.5), via Harvard Dataverse mirror | Census tract, WI | 2022 | µg/m³, modeled |
-| Contextual points | WI DNR Air Management Data Viewer, "All Monitors" | Point, statewide | live snapshot | — |
+| Contextual points | EPA AQS ambient air monitor sites (via already-cached national daily files) | Point, statewide | 2022 | — |
 
 Full field-level detail, missing-value conventions, and per-table row counts are in
 `data/metadata/data_dictionary.md`.
@@ -106,6 +106,37 @@ composited periods differenced against each other plus new validation for
 what counts as "disturbed," a bigger lift than a single-snapshot indicator.
 Both would reuse `src/gee_polygon_utils.py`'s polygon-extraction helper once
 built.
+
+## Multi-state rollout: Minnesota pilot, contextual points moved to EPA AQS
+
+The pipeline above is no longer Wisconsin-only. `src/states.py` is the state
+registry (Wisconsin, Minnesota, and five more Midwest states configured but
+not yet run); every ingestion module takes `--state <ABBR>` and every output
+table now carries a `state_abbr`/`state_name` column. Minnesota was run
+end-to-end as a pilot to confirm the parameterized pipeline generalizes
+correctly before onboarding the remaining states — same schema, same
+indicator set, same validation checks.
+
+Two decisions made as part of this rollout, both affecting Wisconsin's
+existing data too, not just new states:
+
+- **Contextual points moved from Wisconsin DNR's ArcGIS layer to EPA AQS**
+  (`src/ingest_monitors.py`). WI DNR's "All Monitors" layer had no generic
+  equivalent in other states; AQS's daily monitor data was already being
+  pulled nationally for the satellite calibration workstream (see below), so
+  reading it again with a different state filter needed zero new downloads.
+  Trade-off: Wisconsin's contextual layer is smaller than before (23 AQS
+  ambient air monitors vs. 40 WI DNR points) and no longer includes non-AQS
+  permitted-facility points — ambient air monitors only, for every state.
+- **Percentiles are state-relative, always** — `indicator_percentile_wi` and
+  `concern_percentile_wi` are ranked within each state's own tracts
+  (`groupby(["state_abbr", "indicator_name"])` in
+  `src/spatial_join.py::build_screening_view`), never pooled across states.
+  A Minnesota tract's percentile is never compared to a Wisconsin tract's —
+  each state gets its own self-contained 75th-percentile screening
+  threshold, preserving the tool's single-state screening semantics rather
+  than introducing a cross-state ranking claim this project has not
+  validated.
 
 ## Percentile conventions
 

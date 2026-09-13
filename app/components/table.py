@@ -5,8 +5,6 @@ from __future__ import annotations
 import geopandas as gpd
 import streamlit as st
 
-from app.config import STATE_ABBR
-
 TABLE_COLUMNS = [
     "geography_name",
     "county_name",
@@ -20,7 +18,7 @@ TABLE_COLUMNS = [
 ]
 
 
-def render_screening_table(gdf: gpd.GeoDataFrame) -> None:
+def render_screening_table(gdf: gpd.GeoDataFrame, state_abbr: str) -> None:
     st.subheader("Tract review table")
     show_all = st.checkbox("Show all tracts (default: flagged only)", value=False)
     df = gdf if show_all else gdf[gdf["screening_flag"]]
@@ -35,7 +33,7 @@ def render_screening_table(gdf: gpd.GeoDataFrame) -> None:
             "county_name": st.column_config.TextColumn("County"),
             "indicator_value": st.column_config.NumberColumn("Indicator value", format="%.2f"),
             "indicator_percentile_wi": st.column_config.ProgressColumn(
-                f"Indicator %ile ({STATE_ABBR})", min_value=0, max_value=1, format="%.2f"
+                f"Indicator %ile ({state_abbr})", min_value=0, max_value=1, format="%.2f"
             ),
             "concern_percentile_wi": st.column_config.ProgressColumn(
                 "Relative concern", min_value=0, max_value=1, format="%.2f"

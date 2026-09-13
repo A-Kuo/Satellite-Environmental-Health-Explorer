@@ -15,6 +15,7 @@ Requires the same GEE service-account key as src/ingest_satellite.py
 """
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import ee
@@ -23,11 +24,10 @@ import pandas as pd
 
 from src.gee_polygon_utils import build_polygon_fc, reduce_categorical_by_polygon
 from src.ingest_satellite import authenticate
+from src.states import get_state
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PROCESSED_DIR = REPO_ROOT / "data" / "processed"
-TRACTS_PATH = PROCESSED_DIR / "wi_tracts_2022.parquet"
-OUT_PATH = PROCESSED_DIR / "wi_cropland_2022.parquet"
 
 CDL_COLLECTION = "USDA/NASS/CDL"
 CDL_BAND = "cropland"
@@ -111,13 +111,20 @@ def build_indicator_rows(fractions: pd.DataFrame) -> pd.DataFrame:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--state", default="WI", help="State abbreviation, e.g. WI, MN")
+    args = parser.parse_args()
+    state = get_state(args.state)
+
     authenticate()
-    tracts = gpd.read_parquet(TRACTS_PATH)
-    print(f"Extracting CDL {YEAR} cropland fractions for {len(tracts):,} tracts...")
+    tracts_path = PROCESSED_DIR / f"{state.abbr.lower()}_tracts_2022.parquet"
+    out_path = PROCESSED_DIR / f"{state.abbr.lower()}_cropland_2022.parquet"
+    tracts = gpd.read_parquet(tracts_path)
+    print(f"Extracting CDL {YEAR} cropland fractions for {state.name} ({len(tracts):,} tracts)...")
     fractions = extract_cropland_fractions(tracts)
     out = build_indicator_rows(fractions)
-    out.to_parquet(OUT_PATH, index=False)
-    print(f"  -> {OUT_PATH} ({len(out):,} rows, {out['indicator_name'].nunique()} indicators)")
+    out.to_parquet(out_path, index=False)
+    print(f"  -> {out_path} ({len(out):,} rows, {out['indicator_name'].nunique()} indicators)")
 
 
 if __name__ == "__main__":
