@@ -18,8 +18,6 @@ Ships as an interactive Streamlit app (`app/streamlit_app.py`) backed by a
 reproducible data-acquisition, cleaning, and validation pipeline (`src/`). See
 `methodology.md` for data sources, years, units, and known limitations.
 
-<img width="683" height="636" alt="image" src="https://github.com/user-attachments/assets/43f5061a-c7e5-4d63-945e-165c9ba61c47" />
-
 
 ## Model status
 
@@ -45,9 +43,11 @@ subsections for the full investigation.
 
 **RQ1 conclusion:** with the available 2022 monitor, meteorological, land-use, and
 tested satellite data, the pilot models do not meet this project's criteria for
-location-general environmental exposure prediction. This is a substantive negative
-finding, not an unfinished result — see `methodology.md` for the full validation
-matrix and the explicit list of what this project does *not* show.
+location-general environmental exposure prediction.
+
+Here's a screenshot of the demo showing pastureland composition in Wisconsin.
+<img width="1143" height="514" alt="image" src="https://github.com/user-attachments/assets/2ee109e5-fd79-449b-b50f-65efc8631062" />
+
 
 ### MVP scope
 
