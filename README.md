@@ -18,6 +18,9 @@ Ships as an interactive Streamlit app (`app/streamlit_app.py`) backed by a
 reproducible data-acquisition, cleaning, and validation pipeline (`src/`). See
 `methodology.md` for data sources, years, units, and known limitations.
 
+<img width="683" height="636" alt="image" src="https://github.com/user-attachments/assets/43f5061a-c7e5-4d63-945e-165c9ba61c47" />
+
+
 ## Model status
 
 Experimental models are not used as public screening layers.
