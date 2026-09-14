@@ -12,6 +12,24 @@ The default map view (when no `bounds` override is given) is always derived
 from `gdf.total_bounds()`, not a fixed state-specific center/zoom constant --
 this is what lets a newly selected state's tracts be framed correctly with
 no per-state map constant needed.
+
+Performance note: tract geometry is simplified for this render path only
+(WEB_SIMPLIFY_TOLERANCE_DEG below) -- a full Wisconsin choropleth at raw
+TIGER/Line vertex resolution serializes to ~20MB of embedded GeoJSON, which
+is what was actually making the map slow (not satellite data -- this app
+never renders raster imagery). This simplification is independent of
+src/gee_polygon_utils.py's SIMPLIFY_TOLERANCE_DEG, which is tuned for
+30m/10m pixel-resolution equivalence for Earth Engine reduction, not for
+on-screen legibility, and is never reused here.
+
+The simplify step (the actual expensive part -- ~20MB down to ~2MB) is
+cached via `_simplified_layers` below, keyed on the identifying selection
+(state/indicator/SVI-toggle/bounds) rather than on `_gdf` itself (which is
+underscore-prefixed so Streamlit doesn't hash its full content). The
+`folium.Map`/`folium.GeoJson` objects built from that cached, already-small
+data are NOT cached -- `folium.GeoJson`'s style_function closures aren't
+picklable, so `st.cache_data` can't store a whole Map -- but constructing
+them from pre-simplified data is cheap enough not to need caching.
 """
 from __future__ import annotations
 
@@ -19,11 +37,18 @@ import branca.colormap as bcm
 import folium
 import geopandas as gpd
 import pandas as pd
+import streamlit as st
 
 INDICATOR_COLORS = ["#ffffb2", "#fecc5c", "#fd8d3c", "#f03b20", "#bd0026"]
 SVI_COLORS = ["#f7fbff", "#9ecae1", "#3182bd", "#08306b"]
 NO_DATA_COLOR = "#cccccc"
 FLAGGED_OUTLINE_COLOR = "#bd0026"  # matches scatter.py's SCREENING_COLOR_MAP red
+
+# ~0.0007 degrees is roughly 50-75m at Wisconsin/Minnesota latitudes -- chosen
+# for on-screen legibility at typical zoom levels, not measurement precision.
+# Visually verify tract boundaries still look correct zoomed in on a single
+# county before loosening this further.
+WEB_SIMPLIFY_TOLERANCE_DEG = 0.0007
 
 
 def _percentile_style(cmap: bcm.LinearColormap, field: str, outline_flagged: bool = False):
@@ -39,6 +64,46 @@ def _percentile_style(cmap: bcm.LinearColormap, field: str, outline_flagged: boo
         }
 
     return style_function
+
+
+@st.cache_data(show_spinner=False)
+def _simplified_layers(
+    _gdf: gpd.GeoDataFrame,
+    state_abbr: str,
+    indicator_label: str,
+    show_svi_layer: bool,
+    bounds_key: tuple | None,
+) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame | None]:
+    """`_gdf` is underscore-prefixed (not hashed for the cache key) -- the
+    remaining, cheap-to-hash arguments already fully identify which slice of
+    the once-loaded screening view this is (state + indicator + SVI toggle +
+    the county-derived `bounds_key`), so they're what should drive cache
+    hits/misses instead."""
+    simplified_geometry = _gdf.geometry.simplify(WEB_SIMPLIFY_TOLERANCE_DEG, preserve_topology=True)
+
+    # Slicing columns without "geometry" first (then .assign()-ing it back)
+    # silently demotes the result to a plain pandas DataFrame -- folium then
+    # can't recognize the geometry column and reports it as "missing"
+    # entirely. Re-wrap explicitly as a GeoDataFrame after assigning.
+    indicator_geojson = gpd.GeoDataFrame(
+        _gdf[[
+            "geoid", "geography_name", "county_name", "indicator_value",
+            "indicator_percentile_wi", "concern_percentile_wi", "overall_svi_percentile",
+            "screening_flag",
+        ]].assign(geometry=simplified_geometry),
+        geometry="geometry",
+        crs=_gdf.crs,
+    )
+
+    svi_geojson = None
+    if show_svi_layer:
+        svi_geojson = gpd.GeoDataFrame(
+            _gdf[["geoid", "geography_name", "overall_svi_percentile"]].assign(geometry=simplified_geometry),
+            geometry="geometry",
+            crs=_gdf.crs,
+        )
+
+    return indicator_geojson, svi_geojson
 
 
 def build_screening_map(
@@ -57,12 +122,12 @@ def build_screening_map(
         minx, miny, maxx, maxy = gdf.total_bounds
         m.fit_bounds([[miny, minx], [maxy, maxx]])
 
+    bounds_key = tuple(tuple(pair) for pair in bounds) if bounds else None
+    indicator_geojson, svi_geojson = _simplified_layers(
+        gdf, state_abbr, indicator_label, show_svi_layer, bounds_key
+    )
+
     indicator_cmap = bcm.LinearColormap(colors=INDICATOR_COLORS, vmin=0, vmax=1)
-    indicator_geojson = gdf[[
-        "geoid", "geography_name", "county_name", "indicator_value",
-        "indicator_percentile_wi", "concern_percentile_wi", "overall_svi_percentile",
-        "screening_flag", "geometry",
-    ]]
     folium.GeoJson(
         indicator_geojson,
         name=f"{indicator_label} (relative concern)",
@@ -85,7 +150,6 @@ def build_screening_map(
 
     if show_svi_layer:
         svi_cmap = bcm.LinearColormap(colors=SVI_COLORS, vmin=0, vmax=1)
-        svi_geojson = gdf[["geoid", "geography_name", "overall_svi_percentile", "geometry"]]
         folium.GeoJson(
             svi_geojson,
             name="SVI — contextual layer (national-relative)",
