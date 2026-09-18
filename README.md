@@ -274,25 +274,4 @@ against Census's own reference table as a transcription safety check.
   view from `gdf.total_bounds()` rather than a fixed state-specific center/
   zoom constant, so a newly onboarded state's tracts are framed correctly
   with no per-state map constant to add.
-
-**Still not built for any state beyond Wisconsin/Minnesota**:
-- The LUR research pipeline's metric buffering uses `EPSG:3070` (Wisconsin
-  Transverse Mercator) — accurate only within/near Wisconsin. This is the
-  research/calibration workstream, not the 5 screening indicators, and has
-  not been extended (the user has not asked to run the LUR pilots for other
-  states).
-- No city/place (Census Places) geometry is ingested anywhere — county is
-  currently the finest sub-tract administrative unit available, for every
-  state.
-
-## Project summary
-
-Built a reproducible Wisconsin environmental-health GIS pipeline integrating
-public air-quality, meteorological, land-use, road-network, satellite, and
-CDC/ATSDR SVI context. Implemented rolling-origin temporal and
-leave-one-monitor-site-out validation, feature ablation, SHAP diagnostics,
-residual analysis, and prediction-interval coverage tests. Documented
-non-promotion decisions when apparent single-split gains failed temporal or
-spatial generalization, preserving the application as a transparent
-descriptive screening tool rather than overstating model-derived exposure
 estimates.
