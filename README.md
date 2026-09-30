@@ -257,6 +257,7 @@ src/               pipeline modules (states registry, ingest, clean, join, valid
 app/               Streamlit app (streamlit_app.py entry, components/ for map/table/scatter/legend/appendix)
 tests/             pytest validation suite
 .env/              GEE service-account key (gitignored, not committed)
+src/connectors/    national rebuild: ingestion framework, validation gates, connector template (see src/connectors/README.md)
 db/                national rebuild: SQL migrations, migration runner, role setup (see docs/database.md)
 docs/              national rebuild: database, decisions, "what this does not show"
 ```

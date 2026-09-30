@@ -11,9 +11,12 @@ from __future__ import annotations
 import os
 import uuid
 from collections.abc import Iterator
+from pathlib import Path
 
+import pandas as pd
 import psycopg
 import pytest
+from dbtools import add_geography
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
 
@@ -62,6 +65,39 @@ def migrated_db(server_conninfo: str) -> Iterator[str]:
         yield conninfo
     finally:
         _drop_database(server_conninfo, name)
+
+
+TEMPLATE_FIXTURES = Path(__file__).parents[2] / "src/connectors/_template/fixtures"
+
+
+@pytest.fixture
+def pipeline_db(server_conninfo: str) -> Iterator[str]:
+    """A fresh, migrated database with the template's synthetic tracts committed.
+
+    Connector runs commit, so each pipeline test gets its own database instead of
+    the rolled-back connection the schema tests share.
+    """
+    name = _create_database(server_conninfo)
+    conninfo = make_conninfo(server_conninfo, dbname=name)
+    try:
+        apply_migrations(conninfo)
+        tracts = pd.read_csv(TEMPLATE_FIXTURES / "tract_geographies.csv", dtype=str)
+        with psycopg.connect(conninfo) as seed:
+            for geoid, tract_name in tracts.itertuples(index=False):
+                add_geography(seed, geoid, "tract", name=tract_name)
+        yield conninfo
+    finally:
+        _drop_database(server_conninfo, name)
+
+
+@pytest.fixture
+def pg(pipeline_db: str) -> Iterator[psycopg.Connection]:
+    """A connection to the pipeline database (commits are real here)."""
+    connection = psycopg.connect(pipeline_db)
+    try:
+        yield connection
+    finally:
+        connection.close()
 
 
 @pytest.fixture

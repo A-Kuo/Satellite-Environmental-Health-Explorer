@@ -4,6 +4,38 @@ Limits of each component of the national rebuild, updated as each one ships.
 The Wisconsin/Minnesota baseline keeps its own list in `methodology.md`
 ("What this project does not show").
 
+## Connector framework
+
+- **It proves the framework, not any dataset.** The end-to-end tests run a
+  synthetic template against a local PostGIS. No real source (Census, CDC, USDA,
+  GEE) has been connected, so nothing here says a real release loads, or that its
+  quirks are handled.
+- **Gates catch structural and range problems, not wrong data.** A value inside
+  its plausible range, present in the right geography, with the right period can
+  still be a bad estimate. Passing every gate means "well-formed", not "correct".
+- **Plausible ranges are declared, not measured.** Each source's range is a human
+  judgment in its catalog and is only as good as that judgment.
+- **The coverage-drop gate compares against what is already loaded.** On a first
+  load there is nothing to compare with, so it passes by design. A `10%` default
+  threshold is a starting point, not a validated tolerance.
+- **Sentinel codes are declared per source, never detected.** A code the source
+  documents but the connector forgets to declare would survive as a real value;
+  only the `sentinels_gone` gate for the codes that were declared would notice.
+- **A failed fetch leaves no ingest-log row.** Registration happens after the raw
+  payload is saved, so a request that never returned data is reported by the
+  exception, not by the log.
+- **Polite-client behavior is tested with a fake clock and transport.** Real APIs'
+  rate limits, `Retry-After` conventions and outages are not exercised, and
+  live requests have never been made.
+- **One worker per source relies on a direct Postgres connection.** The lock does
+  not work through a transaction-pooled connection, so the framework refuses one.
+- **Provenance points at the payload that last changed a value.** Re-running an
+  unchanged release logs a new payload row but leaves each value's
+  `ingest_run_id` on the run that first set it.
+- **Redaction is name-based.** It masks credential-looking parameter names and
+  `name=value` text. A secret embedded under an innocuous name would not be
+  recognized.
+
 ## Database schema and migrations
 
 - **The schema holds no data yet.** Passing schema tests show that malformed

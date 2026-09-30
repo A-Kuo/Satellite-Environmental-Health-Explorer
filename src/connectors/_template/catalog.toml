@@ -1,0 +1,25 @@
+# Catalog entries for this connector. Copy this file, then declare every
+# indicator the source provides BEFORE writing the fetch code: unit, direction,
+# estimate type, native geography and vintage, cadence, source, license and the
+# plausible range the validation gate will enforce.
+#
+# This entry is synthetic. It exists only to exercise the framework and describes
+# no real place or population.
+
+[[indicator]]
+indicator_key = "template_demo.rate"
+domain = "health"
+name = "Synthetic demonstration rate"
+description = "A made-up percentage used to exercise the connector framework. It describes no real place or population."
+unit = "percent"
+direction = "higher_is_concern"
+estimate_type = "model_based"
+native_geo_level = "tract"
+native_geo_vintage = 2020
+refresh_cadence = "one_time"
+source_name = "Synthetic fixture (connector template)"
+source_url = "https://example.org/synthetic/tract_values.csv"
+license = "CC0 (synthetic data, no real source)"
+notes = "Template only. Never loaded into prod."
+plausible_min = 0
+plausible_max = 100
