@@ -257,6 +257,8 @@ src/               pipeline modules (states registry, ingest, clean, join, valid
 app/               Streamlit app (streamlit_app.py entry, components/ for map/table/scatter/legend/appendix)
 tests/             pytest validation suite
 .env/              GEE service-account key (gitignored, not committed)
+db/                national rebuild: SQL migrations, migration runner, role setup (see docs/database.md)
+docs/              national rebuild: database, decisions, "what this does not show"
 ```
 
 ## Multi-state rollout
