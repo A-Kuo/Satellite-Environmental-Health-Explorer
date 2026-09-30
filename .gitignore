@@ -1,4 +1,5 @@
 agent.md
+.claude/
 
 # Python
 __pycache__/
@@ -7,6 +8,8 @@ __pycache__/
 venv/
 *.egg-info/
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
 
 # Jupyter
 .ipynb_checkpoints/
@@ -15,8 +18,23 @@ venv/
 data/raw/*
 !data/raw/.gitkeep
 
-# OS
+# Secrets and local environment. `.env/` is a directory: `.env/.env` holds env
+# vars and `.env/*.json` holds the GEE service-account key (read by
+# src/ingest_satellite.py). Only `.env.example` (names, no values) is tracked.
+.env
+.env/
+.env.*
+!.env.example
+*.pem
+*.key
+.streamlit/secrets.toml
+
+# Frontend (later components)
+node_modules/
+.next/
+
+# Editors / OS
+.vscode/
+.idea/
 .DS_Store
 Thumbs.db
-.env/.env
-.env/gis-environmental-health-usa-1bc5a3460d37.json

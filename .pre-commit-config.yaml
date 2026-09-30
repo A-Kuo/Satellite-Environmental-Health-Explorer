@@ -1,0 +1,24 @@
+# Install once: `pre-commit install`. Runs on every commit.
+repos:
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ["--baseline", ".secrets.baseline"]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.9
+    hooks:
+      # Scope (national-rebuild code only) is set by [tool.ruff] include in pyproject.toml.
+      - id: ruff-check
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: forbid-secret-files
+        name: forbid secret-like files
+        language: fail
+        entry: >-
+          Secret-like file staged. Secrets live in .env/ (gitignored) or the
+          platform secret store; only .env.example (names, no values) is tracked.
+        files: '(^|/)\.env(/|\.(?!example$)|$)|\.(pem|key)$|service[-_]?account.*\.json$'

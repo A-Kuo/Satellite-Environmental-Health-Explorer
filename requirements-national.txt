@@ -1,0 +1,6 @@
+# Dependencies for the national rebuild (database, connectors, later the API).
+# Install alongside requirements.txt, which is the frozen Wisconsin baseline and
+# already provides pandas, httpx, pyarrow, geopandas and pytest.
+psycopg[binary]>=3.2
+pydantic>=2.7
+python-dotenv>=1.0

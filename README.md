@@ -76,6 +76,25 @@ py -3.12 -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
 ```
 
+## Secrets and environment
+
+Nothing secret is ever committed. Local values live in `.env/` (a gitignored
+directory: `.env/.env` for variables, `.env/*.json` for the GEE service-account
+key). `.env.example` lists every variable name with no values. In cloud sessions
+and CI, set them as platform secrets instead. Never paste a connection string or
+key into chat, an issue or a pull request.
+
+National-rebuild dependencies are separate from the frozen Wisconsin baseline:
+
+```bash
+.venv/bin/pip install -r requirements-dev.txt   # baseline + national + lint/test tools
+pre-commit install                              # secret scan + lint on every commit
+```
+
+`ruff` and `mypy` cover only the national-rebuild code (see `pyproject.toml`).
+The Wisconsin/Minnesota pipeline, app and tests are the reference implementation
+and are not linted or reformatted.
+
 ## Running the pipeline (per state)
 
 Every step below takes `--state <ABBR>` (default `WI`); the abbreviations and

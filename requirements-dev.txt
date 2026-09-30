@@ -1,0 +1,7 @@
+# Everything needed to develop and test locally and in CI.
+-r requirements.txt
+-r requirements-national.txt
+ruff>=0.15
+mypy>=1.19
+detect-secrets>=1.5
+pre-commit>=4
